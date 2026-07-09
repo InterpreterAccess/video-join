@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Interpretation — Interpreter Access LLC</title>
+<script src="https://sdk.twilio.com/js/video/releases/2.29.0/twilio-video.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f6fb; color: #1a1a2e; min-height: 100vh; }
+  .header { background: #2d2d8e; color: white; padding: 16px 20px; text-align: center; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .container { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
+  .card { background: white; border-radius: 14px; padding: 24px; border: 1px solid #e8e8f4; margin-top: 20px; }
+  .card h2 { font-size: 16px; margin-bottom: 16px; color: #2d2d8e; }
+  input[type=text] { width: 100%; padding: 14px; font-size: 22px; letter-spacing: 4px; text-align: center; border: 2px solid #e8e8f4; border-radius: 10px; margin-bottom: 16px; }
+  .role-buttons { display: flex; gap: 10px; margin-bottom: 16px; }
+  .role-btn { flex: 1; padding: 12px; border-radius: 10px; border: 2px solid #e8e8f4; background: white; font-size: 14px; font-weight: 600; cursor: pointer; color: #555; }
+  .role-btn.selected { border-color: #2d2d8e; background: #e3f0fd; color: #2d2d8e; }
+  .btn-join { width: 100%; padding: 14px; border-radius: 10px; background: #2d2d8e; color: white; border: none; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .btn-join:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error { color: #c0392b; font-size: 13px; margin-top: 10px; text-align: center; }
+  .hint { color: #888; font-size: 12px; margin-top: 12px; text-align: center; }
+  #videoArea { display: none; }
+  #remoteMedia, #localMedia { width: 100%; border-radius: 10px; margin-bottom: 12px; background: #000; }
+  #localMedia { max-width: 140px; position: fixed; bottom: 20px; right: 20px; border: 2px solid white; }
+</style>
+</head>
+<body>
+<div class="header"><h1>Interpreter Access LLC — Video</h1></div>
+<div class="container">
+  <div class="card" id="entryCard">
+    <h2>Enter your join code</h2>
+    <input type="text" id="codeInput" maxlength="6" inputmode="numeric" placeholder="000000">
+    <div class="role-buttons">
+      <button class="role-btn" id="roleClient" onclick="selectRole('client')">I'm the client</button>
+      <button class="role-btn" id="roleInterpreter" onclick="selectRole('interpreter')">I'm the interpreter</button>
+    </div>
+    <button class="btn-join" id="joinBtn" onclick="joinRoom()" disabled>Join</button>
+    <div class="error" id="errorMsg"></div>
+    <div class="hint">Your browser will ask to use your camera and microphone — please tap Allow.</div>
+  </div>
+  <div id="videoArea">
+    <div id="remoteMedia"></div>
+    <div id="localMedia"></div>
+  </div>
+</div>
+<script>
+// Backend: your existing Apps Script web app (unchanged).
+var BACKEND_URL = "https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec";
+
+var selectedRole = null;
+
+function selectRole(role) {
+  selectedRole = role;
+  document.getElementById('roleClient').classList.toggle('selected', role === 'client');
+  document.getElementById('roleInterpreter').classList.toggle('selected', role === 'interpreter');
+  checkReady();
+}
+document.getElementById('codeInput').addEventListener('input', checkReady);
+function checkReady() {
+  var code = document.getElementById('codeInput').value.trim();
+  document.getElementById('joinBtn').disabled = !(code.length === 6 && selectedRole);
+}
+
+function joinRoom() {
+  var code = document.getElementById('codeInput').value.trim();
+  document.getElementById('joinBtn').disabled = true;
+  document.getElementById('joinBtn').textContent = 'Connecting...';
+  document.getElementById('errorMsg').textContent = '';
+
+  fetch(BACKEND_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'action=getVideoToken&code=' + encodeURIComponent(code) + '&role=' + encodeURIComponent(selectedRole)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.error) {
+      document.getElementById('errorMsg').textContent = data.error;
+      document.getElementById('joinBtn').disabled = false;
+      document.getElementById('joinBtn').textContent = 'Join';
+      return;
+    }
+    connectToRoom(data.token, data.room);
+  })
+  .catch(function() {
+    document.getElementById('errorMsg').textContent = 'Connection error — please try again.';
+    document.getElementById('joinBtn').disabled = false;
+    document.getElementById('joinBtn').textContent = 'Join';
+  });
+}
+
+function connectToRoom(token, roomName) {
+  Twilio.Video.connect(token, { name: roomName, audio: true, video: true }).then(function(connectedRoom) {
+    document.getElementById('entryCard').style.display = 'none';
+    document.getElementById('videoArea').style.display = 'block';
+
+    connectedRoom.localParticipant.videoTracks.forEach(function(pub) {
+      document.getElementById('localMedia').appendChild(pub.track.attach());
+    });
+    connectedRoom.participants.forEach(attachParticipant);
+    connectedRoom.on('participantConnected', attachParticipant);
+  }).catch(function(err) {
+    document.getElementById('errorMsg').textContent = 'Could not connect: ' + err.message;
+    document.getElementById('joinBtn').disabled = false;
+    document.getElementById('joinBtn').textContent = 'Join';
+  });
+}
+
+function attachParticipant(participant) {
+  participant.tracks.forEach(function(pub) {
+    if (pub.isSubscribed) document.getElementById('remoteMedia').appendChild(pub.track.attach());
+  });
+  participant.on('trackSubscribed', function(track) {
+    document.getElementById('remoteMedia').appendChild(track.attach());
+  });
+}
+
+(function() {
+  var urlParams = new URLSearchParams(window.location.search);
+  var code = urlParams.get('code');
+  var role = urlParams.get('role');
+  if (code) document.getElementById('codeInput').value = code;
+  if (role === 'client' || role === 'interpreter') selectRole(role);
+  if (code && role) { checkReady(); joinRoom(); }
+})();
+</script>
+</body>
+</html>
