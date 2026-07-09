@@ -23,7 +23,13 @@
   .hint { color: #888; font-size: 12px; margin-top: 12px; text-align: center; }
   #videoArea { display: none; }
   #remoteMedia, #localMedia { width: 100%; border-radius: 10px; margin-bottom: 12px; background: #000; }
-  #localMedia { max-width: 140px; position: fixed; bottom: 20px; right: 20px; border: 2px solid white; }
+  #localMedia { max-width: 140px; position: fixed; bottom: 84px; right: 20px; border: 2px solid white; z-index: 5; }
+  .call-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #1a1a2e; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; z-index: 10; }
+  .call-timer { color: white; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .btn-leave { background: #c0392b; color: white; border: none; border-radius: 10px; padding: 12px 22px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .btn-leave:active { opacity: 0.85; }
+  #endedCard { display: none; text-align: center; }
+  #endedCard p { color: #555; margin-bottom: 16px; }
 </style>
 </head>
 <body>
@@ -40,16 +46,32 @@
     <div class="error" id="errorMsg"></div>
     <div class="hint">Your browser will ask to use your camera and microphone — please tap Allow.</div>
   </div>
+
+  <div class="card" id="endedCard">
+    <h2>Call ended</h2>
+    <p>Thank you for using Interpreter Access. You may close this window.</p>
+    <button class="btn-join" onclick="location.reload()">Start another call</button>
+  </div>
+
   <div id="videoArea">
     <div id="remoteMedia"></div>
     <div id="localMedia"></div>
   </div>
 </div>
+
+<div class="call-bar" id="callBar" style="display:none;">
+  <span class="call-timer" id="callTimer">00:00</span>
+  <button class="btn-leave" onclick="leaveCall()">Leave Call</button>
+</div>
+
 <script>
 // Backend: your existing Apps Script web app (unchanged).
 var BACKEND_URL = "https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec";
 
 var selectedRole = null;
+var activeRoom = null;
+var timerInterval = null;
+var callStart = null;
 
 function selectRole(role) {
   selectedRole = role;
@@ -93,14 +115,18 @@ function joinRoom() {
 
 function connectToRoom(token, roomName) {
   Twilio.Video.connect(token, { name: roomName, audio: true, video: true }).then(function(connectedRoom) {
+    activeRoom = connectedRoom;
     document.getElementById('entryCard').style.display = 'none';
     document.getElementById('videoArea').style.display = 'block';
+    document.getElementById('callBar').style.display = 'flex';
+    startTimer();
 
     connectedRoom.localParticipant.videoTracks.forEach(function(pub) {
       document.getElementById('localMedia').appendChild(pub.track.attach());
     });
     connectedRoom.participants.forEach(attachParticipant);
     connectedRoom.on('participantConnected', attachParticipant);
+    connectedRoom.on('disconnected', endCallUI);
   }).catch(function(err) {
     document.getElementById('errorMsg').textContent = 'Could not connect: ' + err.message;
     document.getElementById('joinBtn').disabled = false;
@@ -116,6 +142,38 @@ function attachParticipant(participant) {
     document.getElementById('remoteMedia').appendChild(track.attach());
   });
 }
+
+function leaveCall() {
+  if (activeRoom) activeRoom.disconnect();
+}
+
+function endCallUI() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  if (activeRoom) {
+    activeRoom.localParticipant.tracks.forEach(function(pub) {
+      if (pub.track && pub.track.stop) pub.track.stop();
+    });
+    activeRoom = null;
+  }
+  document.getElementById('videoArea').style.display = 'none';
+  document.getElementById('callBar').style.display = 'none';
+  document.getElementById('endedCard').style.display = 'block';
+}
+
+function startTimer() {
+  callStart = Date.now();
+  timerInterval = setInterval(function() {
+    var s = Math.floor((Date.now() - callStart) / 1000);
+    var mm = String(Math.floor(s / 60)).padStart(2, '0');
+    var ss = String(s % 60).padStart(2, '0');
+    document.getElementById('callTimer').textContent = mm + ':' + ss;
+  }, 1000);
+}
+
+// Make sure the room disconnects if someone just closes the tab.
+window.addEventListener('beforeunload', function() {
+  if (activeRoom) activeRoom.disconnect();
+});
 
 (function() {
   var urlParams = new URLSearchParams(window.location.search);
