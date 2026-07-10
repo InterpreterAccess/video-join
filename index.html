@@ -2,18 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Video Interpretation — Interpreter Access LLC</title>
 <script src="https://sdk.twilio.com/js/video/releases/2.29.0/twilio-video.min.js"></script>
 <style>
+  /* ============================================================
+     Interpreter Access LLC — Video (v2)
+     - Zoom-style equal grid that auto-sizes to participant count
+     - Equal split at every size; speaker view via the toggle
+     - Call bar built into a 100dvh layout + safe-area padding,
+       so Leave Call is always visible on mobile portrait
+     ============================================================ */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f6fb; color: #1a1a2e; min-height: 100vh; }
+  body.in-call { overflow: hidden; }
+
   .header { background: #2d2d8e; color: white; padding: 16px 20px; text-align: center; }
   .header h1 { font-size: 18px; font-weight: 600; }
   .container { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
   .card { background: white; border-radius: 14px; padding: 24px; border: 1px solid #e8e8f4; margin-top: 20px; }
   .card h2 { font-size: 16px; margin-bottom: 16px; color: #2d2d8e; }
-  input[type=text] { width: 100%; padding: 14px; font-size: 22px; letter-spacing: 4px; text-align: center; border: 2px solid #e8e8f4; border-radius: 10px; margin-bottom: 16px; }
+
+  #codeInput { width: 100%; padding: 14px; font-size: 22px; letter-spacing: 4px; text-align: center; border: 2px solid #e8e8f4; border-radius: 10px; margin-bottom: 12px; }
+  .name-input { width: 100%; padding: 12px 14px; font-size: 15px; border: 2px solid #e8e8f4; border-radius: 10px; margin-bottom: 16px; }
   .role-buttons { display: flex; gap: 10px; margin-bottom: 16px; }
   .role-btn { flex: 1; padding: 12px; border-radius: 10px; border: 2px solid #e8e8f4; background: white; font-size: 14px; font-weight: 600; cursor: pointer; color: #555; }
   .role-btn.selected { border-color: #2d2d8e; background: #e3f0fd; color: #2d2d8e; }
@@ -21,23 +33,106 @@
   .btn-join:disabled { opacity: 0.5; cursor: not-allowed; }
   .error { color: #c0392b; font-size: 13px; margin-top: 10px; text-align: center; }
   .hint { color: #888; font-size: 12px; margin-top: 12px; text-align: center; }
-  #videoArea { display: none; }
-  #remoteMedia, #localMedia { width: 100%; border-radius: 10px; margin-bottom: 12px; background: #000; }
-  #localMedia { max-width: 140px; position: fixed; bottom: 84px; right: 20px; border: 2px solid white; z-index: 5; }
-  .call-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #1a1a2e; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; z-index: 10; }
-  .call-timer { color: white; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .btn-leave { background: #c0392b; color: white; border: none; border-radius: 10px; padding: 12px 22px; font-size: 15px; font-weight: 700; cursor: pointer; }
-  .btn-leave:active { opacity: 0.85; }
   #endedCard { display: none; text-align: center; }
   #endedCard p { color: #555; margin-bottom: 16px; }
+
+  /* ---------- In-call layout ---------- */
+  #callUI {
+    position: fixed; inset: 0;
+    height: 100vh;               /* fallback */
+    height: 100dvh;              /* real visible viewport on mobile */
+    display: none;               /* flex when active */
+    flex-direction: column;
+    background: #0e0e1c;
+    z-index: 50;
+  }
+
+  /* Zoom-style equal grid (auto cols set from JS) */
+  #grid {
+    flex: 1; min-height: 0;
+    display: grid; gap: 8px; padding: 8px;
+    grid-auto-rows: 1fr;
+  }
+
+  /* Speaker view: big stage + filmstrip */
+  #stageArea { flex: 1; min-height: 0; display: none; padding: 8px; }
+  #stageArea .tile { width: 100%; height: 100%; }
+  #strip {
+    display: none; flex: 0 0 auto; gap: 8px;
+    padding: 0 8px 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  #strip .tile { flex: 0 0 auto; width: 128px; height: 88px; }
+
+  /* Participant tiles */
+  .tile {
+    position: relative; background: #1b1b30; border-radius: 12px; overflow: hidden;
+    outline: 3px solid transparent; outline-offset: -3px;
+    transition: outline-color 0.2s;
+    min-width: 0; min-height: 0;
+  }
+  .tile.speaking { outline-color: #22c55e; }          /* green = talking, like Zoom */
+  .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile.local video { transform: scaleX(-1); }        /* mirror self-view */
+  .tile .avatar {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    font-size: clamp(22px, 7vw, 52px); font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, #2d2d8e, #5a5ad1);
+  }
+  .tile.cam-off .avatar { display: flex; }
+  .tile.cam-off video { visibility: hidden; }
+  .tile .nameTag {
+    position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px);
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(10, 10, 22, 0.65); color: #fff;
+    font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #strip .tile .nameTag { font-size: 10px; padding: 2px 6px; left: 5px; bottom: 5px; }
+  .tile .micOffIcon { display: none; color: #ff6b6b; flex: 0 0 auto; }
+  .tile.mic-muted .micOffIcon { display: inline-flex; }
+
+  /* Call bar — part of the flex column, padded past phone gesture bars */
+  .call-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: #12121f;
+    padding: 10px 14px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  .call-timer { color: #fff; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ctl { display: flex; gap: 8px; }
+  .ctl button {
+    min-width: 48px; height: 44px; padding: 0 12px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    border: none; border-radius: 10px; background: #26263d; color: #fff;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ctl button:active { opacity: 0.8; }
+  .ctl button.off { background: #3a2430; color: #ff8a8a; }
+  .btn-leave {
+    height: 44px; padding: 0 18px; border: none; border-radius: 10px;
+    background: #c0392b; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-leave:active { opacity: 0.85; }
+  @media (max-width: 440px) {
+    .ctl button span { display: none; }   /* icons only on narrow phones */
+    .ctl button { padding: 0; width: 46px; }
+  }
+
+  #audioRoot { display: none; }
 </style>
 </head>
 <body>
+
 <div class="header"><h1>Interpreter Access LLC — Video</h1></div>
+
 <div class="container">
   <div class="card" id="entryCard">
     <h2>Enter your join code</h2>
     <input type="text" id="codeInput" maxlength="6" inputmode="numeric" placeholder="000000">
+    <input type="text" id="nameInput" class="name-input" maxlength="30" placeholder="Your name (optional)">
     <div class="role-buttons">
       <button class="role-btn" id="roleClient" onclick="selectRole('client')">I'm the client</button>
       <button class="role-btn" id="roleInterpreter" onclick="selectRole('interpreter')">I'm the interpreter</button>
@@ -49,137 +144,378 @@
 
   <div class="card" id="endedCard">
     <h2>Call ended</h2>
-    <p>Thank you for using Interpreter Access. You may close this window.</p>
+    <p id="endedMsg">Thank you for using Interpreter Access. You may close this window.</p>
     <button class="btn-join" onclick="location.reload()">Start another call</button>
   </div>
+</div>
 
-  <div id="videoArea">
-    <div id="remoteMedia"></div>
-    <div id="localMedia"></div>
+<!-- Full-screen call layout -->
+<div id="callUI">
+  <div id="grid"></div>
+  <div id="stageArea"></div>
+  <div id="strip"></div>
+  <div class="call-bar">
+    <span class="call-timer" id="callTimer">00:00</span>
+    <div class="ctl">
+      <button id="micBtn" onclick="toggleMic()"></button>
+      <button id="camBtn" onclick="toggleCam()"></button>
+      <button id="layoutBtn" onclick="toggleLayout()"></button>
+    </div>
+    <button class="btn-leave" onclick="leaveCall()">Leave</button>
   </div>
 </div>
 
-<div class="call-bar" id="callBar" style="display:none;">
-  <span class="call-timer" id="callTimer">00:00</span>
-  <button class="btn-leave" onclick="leaveCall()">Leave Call</button>
-</div>
+<div id="audioRoot"></div>
 
 <script>
-// Backend: your existing Apps Script web app (unchanged).
+// Backend: your existing Apps Script web app (unchanged URL).
 var BACKEND_URL = "https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec";
 
+// ---------- Icons ----------
+var ICONS = {
+  mic: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>',
+  micOff: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2"/><path d="M19 10v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>',
+  micOffSmall: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>',
+  cam: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+  camOff: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+  grid: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+  speaker: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="12" rx="2"/><rect x="3" y="18" width="4" height="3"/><rect x="10" y="18" width="4" height="3"/><rect x="17" y="18" width="4" height="3"/></svg>'
+};
+
+// ---------- State ----------
+var LOCAL = 'local';
 var selectedRole = null;
 var activeRoom = null;
-var timerInterval = null;
-var callStart = null;
+var timerInterval = null, callStart = null;
+var tiles = {};            // sid -> { el, name }
+var tileOrder = [];        // stable join order
+var speakingSid = null;    // dominant speaker (remote only)
+var pinnedSid = null;      // tapped tile in speaker view
+var userMode = null;       // 'grid' | 'speaker' | null = auto
+var micOn = true, camOn = true;
 
+function $(id) { return document.getElementById(id); }
+
+// ---------- Entry screen ----------
 function selectRole(role) {
   selectedRole = role;
-  document.getElementById('roleClient').classList.toggle('selected', role === 'client');
-  document.getElementById('roleInterpreter').classList.toggle('selected', role === 'interpreter');
+  $('roleClient').classList.toggle('selected', role === 'client');
+  $('roleInterpreter').classList.toggle('selected', role === 'interpreter');
   checkReady();
 }
-document.getElementById('codeInput').addEventListener('input', checkReady);
+$('codeInput').addEventListener('input', checkReady);
 function checkReady() {
-  var code = document.getElementById('codeInput').value.trim();
-  document.getElementById('joinBtn').disabled = !(code.length === 6 && selectedRole);
+  var code = $('codeInput').value.trim();
+  $('joinBtn').disabled = !(code.length === 6 && selectedRole);
 }
 
 function joinRoom() {
-  var code = document.getElementById('codeInput').value.trim();
-  document.getElementById('joinBtn').disabled = true;
-  document.getElementById('joinBtn').textContent = 'Connecting...';
-  document.getElementById('errorMsg').textContent = '';
+  var code = $('codeInput').value.trim();
+  var name = $('nameInput').value.trim();
+  $('joinBtn').disabled = true;
+  $('joinBtn').textContent = 'Connecting...';
+  $('errorMsg').textContent = '';
 
   fetch(BACKEND_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'action=getVideoToken&code=' + encodeURIComponent(code) + '&role=' + encodeURIComponent(selectedRole)
+    body: 'action=getVideoToken&code=' + encodeURIComponent(code) +
+          '&role=' + encodeURIComponent(selectedRole) +
+          '&name=' + encodeURIComponent(name)
   })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
     if (data.error) {
-      document.getElementById('errorMsg').textContent = data.error;
-      document.getElementById('joinBtn').disabled = false;
-      document.getElementById('joinBtn').textContent = 'Join';
+      $('errorMsg').textContent = data.error;
+      resetJoinBtn();
       return;
     }
-    connectToRoom(data.token, data.room);
+    connectToRoom(data.token, data.room, data.identity);
   })
-  .catch(function() {
-    document.getElementById('errorMsg').textContent = 'Connection error — please try again.';
-    document.getElementById('joinBtn').disabled = false;
-    document.getElementById('joinBtn').textContent = 'Join';
+  .catch(function () {
+    $('errorMsg').textContent = 'Connection error — please try again.';
+    resetJoinBtn();
   });
 }
+function resetJoinBtn() {
+  $('joinBtn').disabled = false;
+  $('joinBtn').textContent = 'Join';
+}
 
-function connectToRoom(token, roomName) {
-  Twilio.Video.connect(token, { name: roomName, audio: true, video: true }).then(function(connectedRoom) {
-    activeRoom = connectedRoom;
-    document.getElementById('entryCard').style.display = 'none';
-    document.getElementById('videoArea').style.display = 'block';
-    document.getElementById('callBar').style.display = 'flex';
+// ---------- Connect ----------
+function connectToRoom(token, roomName, myIdentity) {
+  Twilio.Video.connect(token, {
+    name: roomName,
+    audio: true,
+    video: { width: 640, height: 480 },
+    dominantSpeaker: true,                       // requires Group Rooms
+    bandwidthProfile: {                          // applied in Group Rooms; ignored otherwise
+      video: { mode: 'collaboration', dominantSpeakerPriority: 'high' }
+    }
+  }).then(function (room) {
+    activeRoom = room;
+    $('entryCard').style.display = 'none';
+    $('callUI').style.display = 'flex';
+    document.body.classList.add('in-call');
+    updateCtlButtons();
     startTimer();
 
-    connectedRoom.localParticipant.videoTracks.forEach(function(pub) {
-      document.getElementById('localMedia').appendChild(pub.track.attach());
-    });
-    connectedRoom.participants.forEach(attachParticipant);
-    connectedRoom.on('participantConnected', attachParticipant);
-    connectedRoom.on('disconnected', endCallUI);
-  }).catch(function(err) {
-    document.getElementById('errorMsg').textContent = 'Could not connect: ' + err.message;
-    document.getElementById('joinBtn').disabled = false;
-    document.getElementById('joinBtn').textContent = 'Join';
+    addLocalTile(room);
+    room.participants.forEach(addParticipant);
+
+    room.on('participantConnected', addParticipant);
+    room.on('participantDisconnected', removeParticipant);
+    room.on('dominantSpeakerChanged', onDominantSpeaker);
+    room.on('disconnected', endCallUI);
+
+    window.addEventListener('resize', applyLayout);
+    window.addEventListener('orientationchange', applyLayout);
+    applyLayout();
+  }).catch(function (err) {
+    $('errorMsg').textContent = 'Could not connect: ' + err.message;
+    resetJoinBtn();
   });
 }
 
-function attachParticipant(participant) {
-  participant.tracks.forEach(function(pub) {
-    if (pub.isSubscribed) document.getElementById('remoteMedia').appendChild(pub.track.attach());
+// ---------- Tiles ----------
+function displayNameFrom(identity) {
+  // Identities look like "Maria#4821" (see backend patch). Fall back gracefully.
+  return String(identity || 'Guest').split('#')[0];
+}
+
+function makeTile(sid, name) {
+  var el = document.createElement('div');
+  el.className = 'tile' + (sid === LOCAL ? ' local' : '');
+  el.id = 'tile-' + sid;
+  el.innerHTML =
+    '<div class="avatar">' + escapeHtml(name.charAt(0).toUpperCase() || '?') + '</div>' +
+    '<div class="nameTag"><span class="micOffIcon">' + ICONS.micOffSmall + '</span><span class="nm"></span></div>';
+  el.querySelector('.nm').textContent = name;
+  el.addEventListener('click', function () { onTileClick(sid); });
+  tiles[sid] = { el: el, name: name };
+  tileOrder.push(sid);
+  return el;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
-  participant.on('trackSubscribed', function(track) {
-    document.getElementById('remoteMedia').appendChild(track.attach());
+}
+
+function addLocalTile(room) {
+  makeTile(LOCAL, 'You');
+  room.localParticipant.videoTracks.forEach(function (pub) {
+    if (pub.track) attachVideo(LOCAL, pub.track);
   });
+}
+
+function addParticipant(p) {
+  makeTile(p.sid, displayNameFrom(p.identity));
+  p.tracks.forEach(function (pub) {
+    if (pub.isSubscribed && pub.track) onTrack(p.sid, pub.track);
+  });
+  p.on('trackSubscribed', function (track) { onTrack(p.sid, track); });
+  p.on('trackUnsubscribed', function (track) { offTrack(track); });
+  applyLayout();
+}
+
+function removeParticipant(p) {
+  var t = tiles[p.sid];
+  if (t) { t.el.remove(); delete tiles[p.sid]; }
+  tileOrder = tileOrder.filter(function (s) { return s !== p.sid; });
+  if (pinnedSid === p.sid) pinnedSid = null;
+  if (speakingSid === p.sid) speakingSid = null;
+  applyLayout();
+}
+
+function onTrack(sid, track) {
+  if (track.kind === 'video') {
+    attachVideo(sid, track);
+    track.on('disabled', function () { setCamOff(sid, true); });
+    track.on('enabled', function () { setCamOff(sid, false); });
+    setCamOff(sid, !track.isEnabled);
+  } else if (track.kind === 'audio') {
+    $('audioRoot').appendChild(track.attach());
+    track.on('disabled', function () { setMicOff(sid, true); });
+    track.on('enabled', function () { setMicOff(sid, false); });
+    setMicOff(sid, !track.isEnabled);
+  }
+}
+
+function attachVideo(sid, track) {
+  var v = track.attach();
+  v.setAttribute('playsinline', '');
+  if (sid === LOCAL) v.muted = true;
+  var tile = tiles[sid];
+  if (tile) tile.el.insertBefore(v, tile.el.firstChild);
+}
+
+function offTrack(track) {
+  track.detach().forEach(function (el) { el.remove(); });
+}
+
+function setMicOff(sid, off) { if (tiles[sid]) tiles[sid].el.classList.toggle('mic-muted', off); }
+function setCamOff(sid, off) { if (tiles[sid]) tiles[sid].el.classList.toggle('cam-off', off); }
+
+// ---------- Dominant speaker ----------
+function onDominantSpeaker(participant) {
+  if (participant) speakingSid = participant.sid;   // keep last speaker during silence
+  Object.keys(tiles).forEach(function (sid) {
+    tiles[sid].el.classList.toggle('speaking', sid === speakingSid);
+  });
+  applyLayout();
+}
+
+// ---------- Layout engine ----------
+function currentMode() {
+  return userMode || 'grid';
+}
+
+function applyLayout() {
+  var mode = currentMode();
+  var grid = $('grid'), stageArea = $('stageArea'), strip = $('strip');
+
+  if (mode === 'grid') {
+    stageArea.style.display = 'none';
+    strip.style.display = 'none';
+    grid.style.display = 'grid';
+    tileOrder.forEach(function (sid) {
+      if (tiles[sid].el.parentNode !== grid) grid.appendChild(tiles[sid].el);
+    });
+    var n = tileOrder.length || 1;
+    var rect = grid.getBoundingClientRect();
+    var cols = (rect.width > 0 && rect.height > 0)
+      ? bestCols(n, rect.width, rect.height)
+      : Math.ceil(Math.sqrt(n));
+    grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+  } else {
+    grid.style.display = 'none';
+    stageArea.style.display = 'flex';
+    var remotes = tileOrder.filter(function (s) { return s !== LOCAL; });
+    var stageSid =
+      (pinnedSid && tiles[pinnedSid]) ? pinnedSid :
+      (speakingSid && tiles[speakingSid]) ? speakingSid :
+      (remotes[0] || LOCAL);
+    strip.style.display = tileOrder.length > 1 ? 'flex' : 'none';
+    tileOrder.forEach(function (sid) {
+      if (sid !== stageSid && tiles[sid].el.parentNode !== strip) strip.appendChild(tiles[sid].el);
+    });
+    if (tiles[stageSid].el.parentNode !== stageArea) stageArea.appendChild(tiles[stageSid].el);
+  }
+  updateLayoutBtn();
+}
+
+// Pick the column count that gives every 16:9-ish tile the most area.
+function bestCols(n, W, H) {
+  var best = 1, bestScale = 0;
+  for (var c = 1; c <= n; c++) {
+    var r = Math.ceil(n / c);
+    var scale = Math.min(W / (16 * c), H / (9 * r));
+    if (scale > bestScale) { bestScale = scale; best = c; }
+  }
+  return best;
+}
+
+function onTileClick(sid) {
+  if (currentMode() !== 'speaker') return;
+  pinnedSid = (pinnedSid === sid) ? null : sid;   // tap a small tile to pin it; tap stage to unpin
+  applyLayout();
+}
+
+// ---------- Controls ----------
+function toggleMic() {
+  if (!activeRoom) return;
+  micOn = !micOn;
+  activeRoom.localParticipant.audioTracks.forEach(function (pub) {
+    if (pub.track) micOn ? pub.track.enable() : pub.track.disable();
+  });
+  setMicOff(LOCAL, !micOn);
+  updateCtlButtons();
+}
+
+function toggleCam() {
+  if (!activeRoom) return;
+  camOn = !camOn;
+  activeRoom.localParticipant.videoTracks.forEach(function (pub) {
+    if (pub.track) camOn ? pub.track.enable() : pub.track.disable();
+  });
+  setCamOff(LOCAL, !camOn);
+  updateCtlButtons();
+}
+
+function toggleLayout() {
+  userMode = (currentMode() === 'grid') ? 'speaker' : 'grid';
+  applyLayout();
+}
+
+function updateCtlButtons() {
+  $('micBtn').innerHTML = (micOn ? ICONS.mic : ICONS.micOff) + '<span>' + (micOn ? 'Mute' : 'Unmute') + '</span>';
+  $('micBtn').classList.toggle('off', !micOn);
+  $('camBtn').innerHTML = (camOn ? ICONS.cam : ICONS.camOff) + '<span>' + (camOn ? 'Camera' : 'Cam off') + '</span>';
+  $('camBtn').classList.toggle('off', !camOn);
+}
+
+function updateLayoutBtn() {
+  var next = (currentMode() === 'grid') ? 'speaker' : 'grid';
+  $('layoutBtn').innerHTML = (next === 'grid' ? ICONS.grid : ICONS.speaker) +
+    '<span>' + (next === 'grid' ? 'Grid' : 'Speaker') + '</span>';
+}
+
+// ---------- Timer / end of call ----------
+function startTimer() {
+  callStart = Date.now();
+  timerInterval = setInterval(function () {
+    var s = Math.floor((Date.now() - callStart) / 1000);
+    var mm = String(Math.floor(s / 60)).padStart(2, '0');
+    var ss = String(s % 60).padStart(2, '0');
+    $('callTimer').textContent = mm + ':' + ss;
+  }, 1000);
 }
 
 function leaveCall() {
   if (activeRoom) activeRoom.disconnect();
 }
 
-function endCallUI() {
+function endCallUI(room, error) {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-  if (activeRoom) {
-    activeRoom.localParticipant.tracks.forEach(function(pub) {
-      if (pub.track && pub.track.stop) pub.track.stop();
-    });
-    activeRoom = null;
+  try {
+    if (activeRoom) {
+      activeRoom.localParticipant.tracks.forEach(function (pub) {
+        if (pub.track && pub.track.stop) pub.track.stop();
+      });
+    }
+  } catch (e) {}
+  activeRoom = null;
+
+  Object.keys(tiles).forEach(function (sid) { tiles[sid].el.remove(); });
+  tiles = {}; tileOrder = [];
+  speakingSid = null; pinnedSid = null; userMode = null;
+  micOn = true; camOn = true;
+  $('audioRoot').innerHTML = '';
+  window.removeEventListener('resize', applyLayout);
+  window.removeEventListener('orientationchange', applyLayout);
+
+  $('callUI').style.display = 'none';
+  document.body.classList.remove('in-call');
+  if (error && error.message) {
+    $('endedMsg').textContent = 'The call ended: ' + error.message + '. You may close this window or start another call.';
   }
-  document.getElementById('videoArea').style.display = 'none';
-  document.getElementById('callBar').style.display = 'none';
-  document.getElementById('endedCard').style.display = 'block';
+  $('endedCard').style.display = 'block';
 }
 
-function startTimer() {
-  callStart = Date.now();
-  timerInterval = setInterval(function() {
-    var s = Math.floor((Date.now() - callStart) / 1000);
-    var mm = String(Math.floor(s / 60)).padStart(2, '0');
-    var ss = String(s % 60).padStart(2, '0');
-    document.getElementById('callTimer').textContent = mm + ':' + ss;
-  }, 1000);
-}
+// Disconnect cleanly if the tab is closed mid-call.
+window.addEventListener('beforeunload', function () { if (activeRoom) activeRoom.disconnect(); });
+window.addEventListener('pagehide', function () { if (activeRoom) activeRoom.disconnect(); });
 
-// Make sure the room disconnects if someone just closes the tab.
-window.addEventListener('beforeunload', function() {
-  if (activeRoom) activeRoom.disconnect();
-});
-
-(function() {
+// ---------- Auto-join from SMS links (?code=...&role=...&name=...) ----------
+(function () {
   var urlParams = new URLSearchParams(window.location.search);
   var code = urlParams.get('code');
   var role = urlParams.get('role');
-  if (code) document.getElementById('codeInput').value = code;
+  var name = urlParams.get('name');
+  if (code) $('codeInput').value = code;
+  if (name) $('nameInput').value = name;
   if (role === 'client' || role === 'interpreter') selectRole(role);
   if (code && role) { checkReady(); joinRoom(); }
 })();
