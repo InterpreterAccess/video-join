@@ -16,6 +16,11 @@
      - Animated logo on the entry card
      - Desktop ≥600px: centered, shape-clamped equal tiles
      - Desktop ≥600px: controls centered in the call bar
+     v4 additions (marked with "NEW (v4)"):
+     - Third role option: "Invited by the client" (joins as a client)
+     - Call duration shown on the end screen
+     - Optional post-call rating + report, emailed to Interpreter Access
+       through the Apps Script backend (see BACKEND PATCH note below)
      ============================================================ */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -151,6 +156,39 @@
     #strip .tile { width: 168px; height: 110px; }
   }
 
+  /* ============ NEW (v4): third role + end-of-call feedback ============ */
+  .role-buttons { flex-wrap: wrap; }
+  .role-btn.wide { flex: 1 1 100%; }
+  #endedDuration {
+    display: none; align-items: center; justify-content: center; gap: 6px;
+    background: #eef0fa; color: #44476a; border-radius: 999px;
+    padding: 6px 14px; font-size: 13px; font-weight: 600;
+    font-variant-numeric: tabular-nums; margin-bottom: 16px;
+  }
+  #feedback { display: none; border-top: 1px solid #eef0f6; margin-top: 4px; padding-top: 16px; text-align: left; }
+  #feedback .fb-title { font-size: 14px; font-weight: 600; color: #2d2d8e; margin-bottom: 4px; text-align: center; }
+  #feedback .fb-sub { font-size: 12px; color: #888; margin-bottom: 12px; text-align: center; }
+  .stars { display: flex; justify-content: center; gap: 6px; margin-bottom: 12px; }
+  .stars button {
+    width: 40px; height: 40px; border: none; background: none; cursor: pointer;
+    font-size: 30px; line-height: 1; color: #d8dbec; padding: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stars button.on { color: #e8a93c; }
+  #reportText {
+    width: 100%; min-height: 76px; resize: vertical;
+    border: 2px solid #e8e8f4; border-radius: 10px; padding: 10px 12px;
+    font-size: 14px; font-family: inherit; color: #1a1a2e; margin-bottom: 12px;
+  }
+  .fb-row { display: flex; gap: 10px; }
+  .btn-skip {
+    flex: 1; padding: 12px; border-radius: 10px; border: 2px solid #e8e8f4;
+    background: white; color: #555; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn-send { flex: 2; padding: 12px; border-radius: 10px; border: none; background: #2d2d8e; color: white; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
+  #fbStatus { font-size: 13px; text-align: center; margin-top: 10px; }
+
   #audioRoot { display: none; }
 </style>
 </head>
@@ -178,6 +216,8 @@
     <div class="role-buttons">
       <button class="role-btn" id="roleClient" onclick="selectRole('client')">I'm the client</button>
       <button class="role-btn" id="roleInterpreter" onclick="selectRole('interpreter')">I'm the interpreter</button>
+      <!-- NEW (v4): joins the call exactly like a client -->
+      <button class="role-btn wide" id="roleInvited" onclick="selectRole('invited')">Invited by the client</button>
     </div>
     <button class="btn-join" id="joinBtn" onclick="joinRoom()" disabled>Join</button>
     <div class="error" id="errorMsg"></div>
@@ -187,7 +227,26 @@
   <div class="card" id="endedCard">
     <h2>Call ended</h2>
     <p id="endedMsg">Thank you for using Interpreter Access. You may close this window.</p>
-    <button class="btn-join" onclick="location.reload()">Start another call</button>
+    <div id="endedDuration"></div>
+    <!-- ============ NEW (v4): optional rating + report ============ -->
+    <div id="feedback">
+      <div class="fb-title">How was your call?</div>
+      <div class="fb-sub">Optional — rate the call, or report a problem to Interpreter Access.</div>
+      <div class="stars" id="stars">
+        <button type="button" onclick="setStars(1)" aria-label="1 star">★</button>
+        <button type="button" onclick="setStars(2)" aria-label="2 stars">★</button>
+        <button type="button" onclick="setStars(3)" aria-label="3 stars">★</button>
+        <button type="button" onclick="setStars(4)" aria-label="4 stars">★</button>
+        <button type="button" onclick="setStars(5)" aria-label="5 stars">★</button>
+      </div>
+      <textarea id="reportText" maxlength="1500" placeholder="Anything to report? A problem with the interpreter, the client, or the call itself — this goes straight to Interpreter Access." oninput="updateSendBtn()"></textarea>
+      <div class="fb-row">
+        <button type="button" class="btn-skip" onclick="skipFeedback()">Skip</button>
+        <button type="button" class="btn-send" id="sendReportBtn" onclick="submitReport()" disabled>Send to Interpreter Access</button>
+      </div>
+      <div id="fbStatus"></div>
+    </div>
+    <button class="btn-join" onclick="location.reload()" style="margin-top: 16px;">Start another call</button>
   </div>
 </div>
 
@@ -213,6 +272,29 @@
 // Backend: your existing Apps Script web app (unchanged URL).
 var BACKEND_URL = "https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec";
 
+/* ============ NEW (v4): BACKEND PATCH — reports by email ============
+   For post-call reports to reach contactinterpreteraccess@gmail.com,
+   add this inside doPost() in your Apps Script, next to where
+   getVideoToken is handled. Then: Deploy > Manage deployments >
+   Edit (pencil) > Version: "New version" > Deploy. URL stays the same.
+
+   if (action === 'submitReport') {
+     MailApp.sendEmail({
+       to: 'contactinterpreteraccess@gmail.com',
+       subject: 'Call report — code ' + (e.parameter.code || '?') +
+                ' — from ' + (e.parameter.role || 'unknown'),
+       body: 'Session code: ' + (e.parameter.code || '') + '\n' +
+             'Submitted by: ' + (e.parameter.role || '') + ' — ' +
+             (e.parameter.name || '(no name)') + '\n' +
+             'Call duration: ' + (e.parameter.duration || '') + '\n' +
+             'Rating: ' + (e.parameter.rating || 'skipped') + '\n\n' +
+             'Report:\n' + (e.parameter.report || '(none)')
+     });
+     return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+       .setMimeType(ContentService.MimeType.JSON);
+   }
+   ==================================================================== */
+
 // ---------- Icons ----------
 var ICONS = {
   mic: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>',
@@ -235,6 +317,9 @@ var speakingSid = null;    // dominant speaker (remote only)
 var pinnedSid = null;      // tapped tile in speaker view
 var userMode = null;       // 'grid' | 'speaker' | null = auto
 var micOn = true, camOn = true;
+var lastSession = null;        // NEW (v4): { code, name, role } for the report
+var lastDuration = '';         // NEW (v4): final call length for the end screen
+var starRating = 0;            // NEW (v4)
 
 function $(id) { return document.getElementById(id); }
 
@@ -243,6 +328,7 @@ function selectRole(role) {
   selectedRole = role;
   $('roleClient').classList.toggle('selected', role === 'client');
   $('roleInterpreter').classList.toggle('selected', role === 'interpreter');
+  $('roleInvited').classList.toggle('selected', role === 'invited');   // NEW (v4)
   checkReady();
 }
 $('codeInput').addEventListener('input', checkReady);
@@ -254,6 +340,9 @@ function checkReady() {
 function joinRoom() {
   var code = $('codeInput').value.trim();
   var name = $('nameInput').value.trim();
+  // NEW (v4): "invited" joins the room exactly like a client
+  var backendRole = (selectedRole === 'invited') ? 'client' : selectedRole;
+  lastSession = { code: code, name: name, role: selectedRole };
   $('joinBtn').disabled = true;
   $('joinBtn').textContent = 'Connecting...';
   $('errorMsg').textContent = '';
@@ -262,7 +351,7 @@ function joinRoom() {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'action=getVideoToken&code=' + encodeURIComponent(code) +
-          '&role=' + encodeURIComponent(selectedRole) +
+          '&role=' + encodeURIComponent(backendRole) +
           '&name=' + encodeURIComponent(name)
   })
   .then(function (r) { return r.json(); })
@@ -561,6 +650,8 @@ function leaveCall() {
 
 function endCallUI(room, error) {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  // NEW (v4): capture the final duration before state resets
+  lastDuration = callStart ? fmtDuration(Date.now() - callStart) : '';
   try {
     if (activeRoom) {
       activeRoom.localParticipant.tracks.forEach(function (pub) {
@@ -583,7 +674,83 @@ function endCallUI(room, error) {
   if (error && error.message) {
     $('endedMsg').textContent = 'The call ended: ' + error.message + '. You may close this window or start another call.';
   }
+  // NEW (v4): show duration + the optional rating/report form
+  if (lastDuration) {
+    $('endedDuration').textContent = 'Call duration ' + lastDuration;
+    $('endedDuration').style.display = 'inline-flex';
+  }
+  if (lastSession) {
+    starRating = 0;
+    setStars(0);
+    $('reportText').value = '';
+    $('fbStatus').textContent = '';
+    $('feedback').style.display = 'block';
+  }
   $('endedCard').style.display = 'block';
+}
+
+// ---------- NEW (v4): duration formatting ----------
+function fmtDuration(ms) {
+  var s = Math.floor(ms / 1000);
+  var mm = String(Math.floor(s / 60)).padStart(2, '0');
+  var ss = String(s % 60).padStart(2, '0');
+  return mm + ':' + ss;
+}
+
+// ---------- NEW (v4): optional rating + report ----------
+function setStars(n) {
+  starRating = n;
+  var btns = $('stars').querySelectorAll('button');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('on', i < n);
+  updateSendBtn();
+}
+
+function updateSendBtn() {
+  $('sendReportBtn').disabled = !(starRating > 0 || $('reportText').value.trim());
+}
+
+function skipFeedback() {
+  $('feedback').style.display = 'none';
+}
+
+function submitReport() {
+  var btn = $('sendReportBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  $('fbStatus').textContent = '';
+  var s = lastSession || {};
+  var roleLabel = (s.role === 'invited') ? 'guest invited by the client' : (s.role || 'unknown');
+  fetch(BACKEND_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'action=submitReport' +
+          '&code=' + encodeURIComponent(s.code || '') +
+          '&role=' + encodeURIComponent(roleLabel) +
+          '&name=' + encodeURIComponent(s.name || '') +
+          '&rating=' + encodeURIComponent(starRating ? starRating + '/5' : 'skipped') +
+          '&duration=' + encodeURIComponent(lastDuration) +
+          '&report=' + encodeURIComponent($('reportText').value.trim())
+  })
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
+    if (data && data.error) throw new Error(data.error);
+    $('feedback').innerHTML =
+      '<div class="fb-title">Thank you — your feedback was sent.</div>' +
+      '<div class="fb-sub">Interpreter Access reviews every report.</div>';
+    $('feedback').style.display = 'block';
+  })
+  .catch(function () {
+    btn.disabled = false;
+    btn.textContent = 'Send to Interpreter Access';
+    var subject = 'Call report — code ' + (s.code || '') + ' — from ' + roleLabel;
+    var bodyTxt = 'Session code: ' + (s.code || '') + '\nSubmitted by: ' + roleLabel + ' — ' + (s.name || '(no name)') +
+      '\nCall duration: ' + lastDuration + '\nRating: ' + (starRating ? starRating + '/5' : 'skipped') +
+      '\n\nReport:\n' + $('reportText').value.trim();
+    $('fbStatus').innerHTML = 'Couldn&#39;t send automatically — ' +
+      '<a href="mailto:contactinterpreteraccess@gmail.com?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(bodyTxt) + '">tap here to email it instead</a>.';
+    $('fbStatus').style.color = '#c0392b';
+  });
 }
 
 // Disconnect cleanly if the tab is closed mid-call.
@@ -598,7 +765,7 @@ window.addEventListener('pagehide', function () { if (activeRoom) activeRoom.dis
   var name = urlParams.get('name');
   if (code) $('codeInput').value = code;
   if (name) $('nameInput').value = name;
-  if (role === 'client' || role === 'interpreter') selectRole(role);
+  if (role === 'client' || role === 'interpreter' || role === 'invited') selectRole(role);   // NEW (v4)
   if (code && role) { checkReady(); joinRoom(); }
 })();
 </script>
