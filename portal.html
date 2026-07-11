@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Interpreter Portal — Interpreter Access LLC</title>
+<script src="https://sdk.twilio.com/js/video/releases/2.29.0/twilio-video.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f4f6fb; color: #1a1a2e;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .screen { display: none; width: 100%; max-width: 460px; padding: 24px 18px 40px; flex: 1; }
+  .screen.on { display: block; }
+  .brand { text-align: center; margin: 26px 0 22px; }
+  .brand .t1 { font-size: 20px; font-weight: 700; color: #2d2d8e; }
+  .brand .t2 { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #7a7fb8; margin-top: 4px; }
+  .card { background: #fff; border: 1px solid #e4e6f2; border-radius: 14px; padding: 22px 20px; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #4a4a66; margin-bottom: 8px; }
+  input[type=tel] {
+    width: 100%; font-size: 26px; letter-spacing: 0.35em; text-align: center;
+    padding: 12px 10px; border: 1.5px solid #c9cde8; border-radius: 10px; color: #1a1a2e; outline: none;
+  }
+  input[type=tel]:focus { border-color: #2d2d8e; }
+  .btn {
+    display: block; width: 100%; border: none; border-radius: 10px; cursor: pointer;
+    font-size: 16px; font-weight: 700; padding: 14px; margin-top: 14px;
+    background: #2d2d8e; color: #fff; font-family: inherit;
+  }
+  .btn:disabled { opacity: 0.5; }
+  .err { color: #c62828; font-size: 13.5px; margin-top: 12px; text-align: center; min-height: 18px; }
+  .hint { font-size: 12.5px; color: #8a8fa8; text-align: center; margin-top: 14px; line-height: 1.5; }
+
+  /* home */
+  .me { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .me .nm { font-size: 17px; font-weight: 700; color: #2d2d8e; }
+  .me .id { font-size: 12px; color: #8a8fa8; }
+  .out { font-size: 12.5px; color: #8a8fa8; background: none; border: none; cursor: pointer; text-decoration: underline; font-family: inherit; }
+  .bar { display: flex; gap: 10px; margin-bottom: 14px; }
+  .tog { flex: 1.4; border: 1px solid #bfe3cc; border-radius: 10px; background: #fff; padding: 11px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; color: #1e7d3e; }
+  .tog.off { color: #8a8fa8; border-color: #c9cde8; }
+  .hb { flex: 1; border: 1px solid #c9cde8; border-radius: 10px; background: #fff; padding: 11px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; color: #2d2d8e; }
+  .hrow { display: flex; justify-content: space-between; gap: 10px; padding: 10px 2px; border-bottom: 1px solid #eef0f8; font-size: 13.5px; }
+  .hrow .d { color: #8a8fa8; white-space: nowrap; }
+  .waitmsg { text-align: center; color: #8a8fa8; font-size: 14px; padding: 34px 10px; line-height: 1.6; }
+  .pulse { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #1e7d3e; margin-right: 7px; animation: pl 1.6s infinite; }
+  @keyframes pl { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+  .callcard { background: #fff; border: 1.5px solid #2d2d8e; border-radius: 14px; padding: 18px; margin-bottom: 12px; }
+  .callcard .who { font-size: 16px; font-weight: 700; }
+  .callcard .meta { font-size: 12.5px; color: #8a8fa8; margin-top: 3px; }
+  .row { display: flex; gap: 10px; margin-top: 14px; }
+  .acc { flex: 2; border: none; border-radius: 10px; background: #1e7d3e; color: #fff; font-size: 15px; font-weight: 700; padding: 13px; cursor: pointer; font-family: inherit; }
+  .dec { flex: 1; border: 1px solid #c9cde8; border-radius: 10px; background: #fff; color: #4a4a66; font-size: 15px; font-weight: 600; padding: 13px; cursor: pointer; font-family: inherit; }
+
+  /* call */
+  #callScr { max-width: none; padding: 0; position: fixed; inset: 0; background: #10102a; z-index: 20; }
+  #them { position: absolute; inset: 0; }
+  #them video { width: 100%; height: 100%; object-fit: cover; }
+  #me { position: absolute; top: 14px; right: 14px; width: 96px; height: 128px; border-radius: 10px; overflow: hidden; background: #23234a; border: 1px solid rgba(255,255,255,0.25); }
+  #me video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  #ctimer { position: absolute; top: 18px; left: 16px; color: #fff; font-size: 15px; font-weight: 600; background: rgba(0,0,0,0.45); padding: 6px 12px; border-radius: 20px; }
+  .ctls { position: absolute; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; gap: 18px; }
+  .cbtn { width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer; font-size: 22px; color: #fff; background: rgba(255,255,255,0.18); }
+  .cbtn.end { background: #c62828; }
+  .cbtn.mut { background: #fff; color: #10102a; }
+  .cwait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.7); font-size: 15px; text-align: center; padding: 20px; }
+
+  /* end */
+  .bigt { font-size: 44px; font-weight: 700; color: #2d2d8e; text-align: center; margin: 10px 0 2px; }
+  .endc { text-align: center; padding: 40px 20px; }
+  .endc .lbl { color: #8a8fa8; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="screen on" id="loginScr">
+  <div class="brand"><div class="t1">Interpreter Access LLC</div><div class="t2">Interpreter Portal</div></div>
+  <div class="card">
+    <label for="pin">Your 6-digit PIN</label>
+    <input type="tel" id="pin" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+    <button class="btn" id="inBtn" disabled>Sign in</button>
+    <div class="err" id="lerr"></div>
+  </div>
+  <p class="hint">Have a personal link? Just open it — no PIN needed.</p>
+</div>
+
+<div class="screen" id="homeScr">
+  <div class="brand" style="margin-bottom:14px"><div class="t1">Interpreter Access LLC</div><div class="t2">Interpreter Portal</div></div>
+  <div class="me card" style="padding:14px 18px">
+    <div><div class="nm" id="meName"></div><div class="id" id="meId"></div></div>
+    <button class="out" id="outBtn">Sign out</button>
+  </div>
+  <div class="bar">
+    <button class="tog" id="avBtn">&#9679; Available</button>
+    <button class="hb" id="histBtn">History</button>
+  </div>
+  <div id="calls"></div>
+  <div class="waitmsg" id="waitmsg"><span class="pulse"></span>Signed in. Waiting for calls — keep this page open.</div>
+</div>
+
+<div class="screen" id="callScr">
+  <div id="them"><div class="cwait" id="cwait">Connecting…</div></div>
+  <div id="me"></div>
+  <div id="ctimer">00:00</div>
+  <div class="ctls">
+    <button class="cbtn" id="muteBtn" title="Mute">&#127908;</button>
+    <button class="cbtn end" id="endBtn" title="End call">&#128379;</button>
+  </div>
+</div>
+
+<div class="screen" id="endScr">
+  <div class="endc card" style="margin-top:70px">
+    <div class="lbl">Call ended — duration</div>
+    <div class="bigt" id="finalT">00:00</div>
+    <button class="btn" id="backBtn" style="max-width:220px;margin:22px auto 0">Back to calls</button>
+  </div>
+</div>
+
+<div class="screen" id="histScr">
+  <div class="brand" style="margin-bottom:14px"><div class="t1">My calls</div><div class="t2" id="histWho"></div></div>
+  <div class="card">
+    <div style="font-size:13px;color:#8a8fa8">Total interpreted</div>
+    <div style="font-size:32px;font-weight:700;color:#2d2d8e" id="histTot">&hellip;</div>
+    <div id="histList" style="margin-top:10px"></div>
+  </div>
+  <button class="btn" id="histBack">Back</button>
+</div>
+
+<script>
+var BACKEND_URL = "https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec";
+
+var me = null;            // {id, name, token}
+var room = null, tmr = null, t0 = null, curCode = null;
+var known = {}, dismissed = {}, pollTmr = null;
+var audioCtx = null;
+
+function $(i) { return document.getElementById(i); }
+function post(params) {
+  var body = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+  return fetch(BACKEND_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+    .then(function (r) { return r.json(); });
+}
+function show(id) {
+  ['loginScr', 'homeScr', 'callScr', 'endScr', 'histScr'].forEach(function (s) { $(s).classList.toggle('on', s === id); });
+}
+function fmt(s) {
+  var m = Math.floor(s / 60), r = s % 60;
+  return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+}
+function beep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.7);
+    o.start(); o.stop(audioCtx.currentTime + 0.7);
+  } catch (e) {}
+}
+
+/* ---------- login ---------- */
+$('pin').addEventListener('input', function () { $('inBtn').disabled = $('pin').value.trim().length !== 6; });
+$('inBtn').addEventListener('click', function () { login($('pin').value.trim()); });
+$('outBtn').addEventListener('click', function () {
+  localStorage.removeItem('ia_t'); me = null; stopPoll();
+  history.replaceState(null, '', location.pathname);
+  show('loginScr');
+});
+$('backBtn').addEventListener('click', function () { show('homeScr'); startPoll(); });
+
+var avail = true;
+$('avBtn').addEventListener('click', function () {
+  avail = !avail;
+  $('avBtn').innerHTML = avail ? '&#9679; Available' : '&#9675; Unavailable';
+  $('avBtn').classList.toggle('off', !avail);
+  $('calls').innerHTML = '';
+  $('waitmsg').innerHTML = avail ? '<span class="pulse"></span>Signed in. Waiting for calls \u2014 keep this page open.' : 'You are unavailable \u2014 no call alerts until you switch back.';
+  toggleWait();
+  if (me) post({ portal: 'avail', t: me.token, on: avail ? 1 : 0 }).catch(function () {});
+  if (avail) poll();
+});
+$('histBtn').addEventListener('click', function () {
+  show('histScr');
+  $('histWho').textContent = me ? me.name : '';
+  $('histTot').innerHTML = '&hellip;';
+  $('histList').innerHTML = '';
+  post({ portal: 'history', t: me.token }).then(function (d) {
+    if (d.error) { $('histTot').textContent = '\u2014'; $('histList').textContent = d.error; return; }
+    $('histTot').textContent = d.totalMin + ' min';
+    if (!d.calls.length) { $('histList').innerHTML = '<div class="hrow"><span class="d">No calls yet</span></div>'; return; }
+    d.calls.forEach(function (c) {
+      var r = document.createElement('div'); r.className = 'hrow';
+      var l = document.createElement('span'); l.textContent = c.date + ' \u00b7 code ' + c.code;
+      var v = document.createElement('span'); v.className = 'd'; v.textContent = c.min + ' min';
+      r.appendChild(l); r.appendChild(v); $('histList').appendChild(r);
+    });
+  }).catch(function () { $('histTot').textContent = 'Connection error'; });
+});
+$('histBack').addEventListener('click', function () { show('homeScr'); });
+
+function login(v) {
+  $('inBtn').disabled = true; $('inBtn').textContent = 'Signing in…'; $('lerr').textContent = '';
+  post({ portal: 'login', v: v, url: location.origin + location.pathname })
+    .then(function (d) {
+      $('inBtn').textContent = 'Sign in'; $('inBtn').disabled = false;
+      if (d.error) { $('lerr').textContent = d.error; return; }
+      me = d;
+      localStorage.setItem('ia_t', d.token);
+      $('meName').textContent = d.name;
+      $('meId').textContent = 'ID ' + d.id;
+      show('homeScr'); startPoll();
+    })
+    .catch(function () { $('inBtn').textContent = 'Sign in'; $('inBtn').disabled = false; $('lerr').textContent = 'Connection error — try again.'; });
+}
+
+/* ---------- waiting calls ---------- */
+function startPoll() { poll(); if (!pollTmr) pollTmr = setInterval(poll, 5000); }
+function stopPoll() { clearInterval(pollTmr); pollTmr = null; }
+
+function poll() {
+  if (!me || !avail) return;
+  post({ portal: 'waiting' }).then(function (d) {
+    if (!d || !d.calls) return;
+    var wrap = $('calls'); wrap.innerHTML = '';
+    var shown = 0;
+    d.calls.forEach(function (c) {
+      if (dismissed[c.code]) return;
+      if (!known[c.code]) { known[c.code] = true; beep(); }
+      shown++;
+      var el = document.createElement('div');
+      el.className = 'callcard';
+      var who = document.createElement('div'); who.className = 'who';
+      who.textContent = c.client ? c.client : 'Incoming video call';
+      var meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = 'Code ' + c.code + ' · waiting ' + fmt(c.secs);
+      var row = document.createElement('div'); row.className = 'row';
+      var a = document.createElement('button'); a.className = 'acc'; a.textContent = 'Accept';
+      a.onclick = function () { accept(c.code, a); };
+      var x = document.createElement('button'); x.className = 'dec'; x.textContent = 'Decline';
+      x.onclick = function () { dismissed[c.code] = true; el.remove(); toggleWait(); };
+      row.appendChild(a); row.appendChild(x);
+      el.appendChild(who); el.appendChild(meta); el.appendChild(row);
+      wrap.appendChild(el);
+    });
+    toggleWait(shown);
+  }).catch(function () {});
+}
+function toggleWait(n) {
+  if (n === undefined) n = $('calls').children.length;
+  $('waitmsg').style.display = n ? 'none' : 'block';
+}
+
+/* ---------- accept -> join ---------- */
+function accept(code, btn) {
+  btn.disabled = true; btn.textContent = 'Claiming…';
+  post({ portal: 'accept', code: code, t: me.token }).then(function (d) {
+    if (d.error) { alert(d.error); btn.disabled = false; btn.textContent = 'Accept'; poll(); return; }
+    btn.textContent = 'Joining…';
+    return post({ action: 'getVideoToken', code: code, role: 'interpreter', name: me.name })
+      .then(function (v) {
+        if (v.error) { alert(v.error); btn.disabled = false; btn.textContent = 'Accept'; return; }
+        joinCall(v.token, v.room, code);
+      });
+  }).catch(function () { btn.disabled = false; btn.textContent = 'Accept'; alert('Connection error — try again.'); });
+}
+
+function joinCall(token, roomName, code) {
+  curCode = code; stopPoll();
+  show('callScr'); $('cwait').style.display = 'flex'; $('cwait').textContent = 'Connecting…';
+  Twilio.Video.connect(token, { name: roomName, audio: true, video: { width: 640, height: 480 } })
+    .then(function (r) {
+      room = r;
+      t0 = Date.now();
+      $('ctimer').textContent = '00:00';
+      tmr = setInterval(function () { $('ctimer').textContent = fmt(Math.floor((Date.now() - t0) / 1000)); }, 1000);
+
+      r.localParticipant.videoTracks.forEach(function (pub) { if (pub.track) $('me').appendChild(pub.track.attach()); });
+      r.participants.forEach(hookP);
+      r.on('participantConnected', hookP);
+      r.on('disconnected', endUI);
+      if (r.participants.size === 0) $('cwait').textContent = 'Waiting for the client…';
+      else $('cwait').style.display = 'none';
+    })
+    .catch(function (err) { alert('Could not connect: ' + err.message); show('homeScr'); startPoll(); });
+}
+function hookP(p) {
+  $('cwait').style.display = 'none';
+  p.tracks.forEach(function (pub) { if (pub.isSubscribed && pub.track) attach(pub.track); });
+  p.on('trackSubscribed', attach);
+}
+function attach(track) {
+  $('cwait').style.display = 'none';
+  var el = track.attach();
+  $('them').appendChild(el);
+}
+
+$('muteBtn').addEventListener('click', function () {
+  if (!room) return;
+  var on = null;
+  room.localParticipant.audioTracks.forEach(function (pub) {
+    if (on === null) on = !pub.track.isEnabled;
+    if (on) pub.track.enable(); else pub.track.disable();
+  });
+  $('muteBtn').classList.toggle('mut', on === false);
+});
+$('endBtn').addEventListener('click', function () { if (room) room.disconnect(); else endUI(); });
+
+function endUI() {
+  var secs = t0 ? Math.floor((Date.now() - t0) / 1000) : 0;
+  clearInterval(tmr); tmr = null;
+  if (room) { room = null; }
+  $('them').innerHTML = '<div class="cwait" id="cwait">Connecting…</div>';
+  $('me').innerHTML = '';
+  $('finalT').textContent = fmt(secs);
+  show('endScr');
+  if (curCode && me) post({ portal: 'end', code: curCode, t: me.token, secs: secs }).catch(function () {});
+  curCode = null; t0 = null;
+}
+
+/* ---------- auto sign-in ---------- */
+(function () {
+  var m = location.search.match(/[?&]t=([^&]+)/);
+  var t = m ? decodeURIComponent(m[1]) : localStorage.getItem('ia_t');
+  if (t) login(t);
+})();
+</script>
+</body>
+</html>
