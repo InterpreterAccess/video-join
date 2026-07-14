@@ -560,7 +560,7 @@
 <img id="bgMark" alt="" aria-hidden="true">
 <div class="site-footer">
   <span class="sf-brand"><img id="sfMark" alt="">© 2026 Interpreter Access LLC</span>
-  <a href="/cdn-cgi/l/email-protection#07646869736664736e6973627577756273627566646462747447606a666e6b2964686a"><span class="__cf_email__" data-cfemail="b6d5d9d8c2d7d5c2dfd8c2d3c4c6c4d3c2d3c4d7d5d5d3c5c5f6d1dbd7dfda98d5d9db">[email&#160;protected]</span></a>
+  <a href="/cdn-cgi/l/email-protection#f89b97968c999b8c91968c9d8a888a9d8c9d8a999b9b9d8b8bb89f95999194d69b9795"><span class="__cf_email__" data-cfemail="e0838f8e94818394898e948592909285948592818383859393a0878d81898cce838f8d">[email&#160;protected]</span></a>
 </div>
 
 <div id="audioRoot"></div>
@@ -662,6 +662,7 @@ function joinRoom() {
   var name = $('nameInput').value.trim();
   // NEW (v4): "invited" joins the room exactly like a client
   var backendRole = (selectedRole === 'invited') ? 'client' : selectedRole;
+  if (backendRole === 'interpreter') { name = (name || 'Interpreter') + '\u200b'; }   // NEW (v9): invisible role marker
   lastSession = { code: code, name: name, role: selectedRole };
   $('joinBtn').disabled = true;
   $('joinBtn').textContent = 'Connecting...';
@@ -763,6 +764,7 @@ function addLocalTile(room) {
 
 function addParticipant(p) {
   makeTile(p.sid, displayNameFrom(p.identity));
+  if (!isInterpreterIdentity(p.identity)) sawClient = true;   // NEW (v9)
   p.tracks.forEach(function (pub) {
     if (pub.isSubscribed && pub.track) onTrack(p.sid, pub.track);
   });
@@ -778,6 +780,7 @@ function removeParticipant(p) {
   if (pinnedSid === p.sid) pinnedSid = null;
   if (speakingSid === p.sid) speakingSid = null;
   applyLayout();
+  maybeEndAfterClientLeft();   // NEW (v9)
 }
 
 function onTrack(sid, track) {
@@ -968,7 +971,56 @@ function leaveCall() {
   if (activeRoom) activeRoom.disconnect();
 }
 
+// ---- NEW (v9): one-time video code + call ends for everyone when the last client leaves ----
+var ZWROLE = '\u200b';
+var sawClient = false;
+var autoEndReason = null;
+var codeExpired = false;
+function isInterpreterIdentity(id) { return String(id || '').indexOf(ZWROLE) >= 0; }
+function countRemoteClients() {
+  var n = 0;
+  if (!activeRoom) return 0;
+  activeRoom.participants.forEach(function (p) { if (!isInterpreterIdentity(p.identity)) n++; });
+  return n;
+}
+function expireCodeNow(useBeacon) {
+  if (codeExpired || !lastSession || !lastSession.code) return;
+  codeExpired = true;
+  var body = 'action=expireVideoCode&code=' + encodeURIComponent(lastSession.code);
+  if (useBeacon && navigator.sendBeacon) {
+    try { navigator.sendBeacon(BACKEND_URL, new Blob([body], { type: 'application/x-www-form-urlencoded' })); return; } catch (e) {}
+  }
+  fetch(BACKEND_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body, keepalive: true }).catch(function () {});
+}
+function maybeEndAfterClientLeft() {
+  if (!activeRoom || !sawClient) return;
+  if (countRemoteClients() > 0) return;
+  if (!(lastSession && lastSession.role === 'interpreter')) return;   // only the interpreter side auto-ends
+  autoEndReason = 'The client has left, so this session is closed. Thank you!';
+  expireCodeNow(false);
+  activeRoom.disconnect();
+}
+// NEW (v9): write the contact email with JS so email-protection proxies cannot mangle it
+function fixContactEmail() {
+  var em = 'contactinterpreteraccess' + '@' + 'gmail' + '.com';
+  var cf = document.querySelectorAll('.__cf_email__');
+  for (var i = 0; i < cf.length; i++) {
+    cf[i].textContent = em;
+    if (cf[i].parentNode && cf[i].parentNode.tagName === 'A') cf[i].parentNode.setAttribute('href', 'mailto:' + em);
+  }
+  var as = document.querySelectorAll('a');
+  for (var j = 0; j < as.length; j++) {
+    var h = as[j].getAttribute('href') || '';
+    if (h.indexOf('mailto:') === 0) {
+      as[j].setAttribute('href', 'mailto:' + em);
+      if (as[j].textContent.indexOf('protected') >= 0 || as[j].textContent.indexOf('email') === 0) as[j].textContent = em;
+    }
+  }
+}
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', fixContactEmail); } else { fixContactEmail(); }
+
 function endCallUI(room, error) {
+  if (lastSession && lastSession.role !== 'interpreter' && countRemoteClients() === 0) expireCodeNow(false);   // NEW (v9): last client out = code dead
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   // NEW (v4): capture the final duration before state resets
   lastDuration = callStart ? fmtDuration(Date.now() - callStart) : '';
@@ -991,7 +1043,10 @@ function endCallUI(room, error) {
 
   $('callUI').style.display = 'none';
   document.body.classList.remove('in-call');
-  if (error && error.message) {
+  if (autoEndReason) {
+    $('endedMsg').textContent = autoEndReason;
+    autoEndReason = null;
+  } else if (error && error.message) {
     $('endedMsg').textContent = 'The call ended: ' + error.message + '. You may close this window or start another call.';
   }
   // NEW (v4): show duration + the optional rating/report form
@@ -1075,7 +1130,10 @@ function submitReport() {
 
 // Disconnect cleanly if the tab is closed mid-call.
 window.addEventListener('beforeunload', function () { if (activeRoom) activeRoom.disconnect(); });
-window.addEventListener('pagehide', function () { if (activeRoom) activeRoom.disconnect(); });
+window.addEventListener('pagehide', function () {
+  if (activeRoom && lastSession && lastSession.role !== 'interpreter' && countRemoteClients() === 0) expireCodeNow(true);
+  if (activeRoom) activeRoom.disconnect();
+});
 
 // REPLACED: tap = the logo dissolves into mystical smoke and reforms (no figure)
 showTez = function() {
