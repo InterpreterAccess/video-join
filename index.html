@@ -580,7 +580,7 @@ function chooseLanding(role) {
   if (note) note.textContent = role === 'client' ? 'Joining as the client' : (role === 'interpreter' ? 'Joining as the interpreter' : 'Joining as a guest of the client');
 }
 function goInterpreterPortal() {
-  window.location.href = 'https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec';
+  window.location.href = 'https://video.interpreteraccess.com/portal.html';
 }
 function showLanding() {
   var lc = document.getElementById('landingCard');
@@ -1078,7 +1078,7 @@ function goPortalHome() {
   // Came from the portal? Go back in signed-in (the join link carries ret=<their id>)
   var ret = null;
   try { ret = new URLSearchParams(window.location.search).get('ret'); } catch (e) {}
-  window.location.href = 'https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec' + (ret ? '?id=' + encodeURIComponent(ret) : '');
+  window.location.href = 'https://video.interpreteraccess.com/portal.html' + (ret ? '?id=' + encodeURIComponent(ret) : '');
 }
 
 // ---------- NEW (v4): duration formatting ----------
