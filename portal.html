@@ -10,6 +10,11 @@
 </style>
 </head>
 <body>
-<iframe src="https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec" allow="camera; microphone; clipboard-write" title="Interpreter Portal"></iframe>
+<iframe id="portalFrame" allow="camera; microphone; clipboard-write" title="Interpreter Portal"></iframe>
+<script>
+  // Forward any query string (e.g. ?id=... from sign-in redirects) into the portal
+  var BASE = 'https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec';
+  document.getElementById('portalFrame').src = BASE + (location.search || '');
+</script>
 </body>
 </html>
