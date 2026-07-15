@@ -536,7 +536,8 @@
       </div>
       <div id="fbStatus"></div>
     </div>
-    <button class="btn-join" onclick="location.reload()" style="margin-top: 16px;">Start another call</button>
+    <button class="btn-join" id="backPortalBtn" onclick="goPortalHome()" style="margin-top: 16px; display: none;">Back to portal</button>
+    <button class="btn-join" id="anotherCallBtn" onclick="startFresh()" style="margin-top: 16px;">Start another call</button>
   </div>
 </div>
 
@@ -560,7 +561,7 @@
 <img id="bgMark" alt="" aria-hidden="true">
 <div class="site-footer">
   <span class="sf-brand"><img id="sfMark" alt="">© 2026 Interpreter Access LLC</span>
-  <a href="/cdn-cgi/l/email-protection#3d5e5253495c5e49545349584f4d4f5849584f5c5e5e584e4e7d5a505c5451135e5250"><span class="__cf_email__" data-cfemail="66050908120705120f0812031416140312031407050503151526010b070f0a4805090b">[email&#160;protected]</span></a>
+  <a href="/cdn-cgi/l/email-protection#0f6c60617b6e6c7b66617b6a7d7f7d6a7b6a7d6e6c6c6a7c7c4f68626e6663216c6062"><span class="__cf_email__" data-cfemail="7f1c10110b1e1c0b16110b1a0d0f0d1a0b1a0d1e1c1c1a0c0c3f18121e1613511c1012">[email&#160;protected]</span></a>
 </div>
 
 <div id="audioRoot"></div>
@@ -1061,7 +1062,20 @@ function endCallUI(room, error) {
     $('fbStatus').textContent = '';
     $('feedback').style.display = 'block';
   }
+  // NEW (v10): interpreters get a Back-to-portal button; codes are one-time so no rejoin
+  if (lastSession && lastSession.role === 'interpreter') {
+    $('backPortalBtn').style.display = 'block';
+    $('anotherCallBtn').style.display = 'none';
+  }
   $('endedCard').style.display = 'block';
+}
+
+// NEW (v10): never re-run an expired code from the URL — reload the page clean
+function startFresh() {
+  window.location.href = window.location.pathname;
+}
+function goPortalHome() {
+  window.location.href = 'https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec';
 }
 
 // ---------- NEW (v4): duration formatting ----------
