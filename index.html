@@ -658,6 +658,7 @@ function checkReady() {
   $('joinBtn').disabled = !(code.length === 6 && selectedRole);
 }
 
+var waitTimer = null, waitUntil = 0;   // NEW (v17): interpreter waiting-for-client loop
 function joinRoom() {
   var code = $('codeInput').value.trim();
   var name = $('nameInput').value.trim();
@@ -679,10 +680,37 @@ function joinRoom() {
   .then(function (r) { return r.json(); })
   .then(function (data) {
     if (data.error) {
+      // NEW (v17): the client isn't in the room yet — wait and auto-connect
+      if (data.error === 'waiting_for_client' && backendRole === 'interpreter') {
+        if (!waitUntil) waitUntil = Date.now() + 10 * 60000;
+        if (Date.now() < waitUntil) {
+          var waitedMs = 10 * 60000 - (waitUntil - Date.now());
+          if (waitedMs > 150000) {
+            $('errorMsg').style.color = '#b26a00';
+            $('errorMsg').textContent = 'Still no client after ' + Math.round(waitedMs / 60000) + ' min \u2014 they may have hung up before starting the video. You can keep waiting or close this page.';
+          } else {
+            $('errorMsg').style.color = '#2f8f70';
+            $('errorMsg').textContent = 'Waiting for the client to join\u2026 this page will connect you automatically. Keep it open.';
+          }
+          $('joinBtn').textContent = 'Waiting for client\u2026';
+          waitTimer = setTimeout(joinRoom, 4000);
+          return;
+        }
+        waitUntil = 0;
+        $('errorMsg').style.color = '';
+        $('errorMsg').textContent = 'The client never joined \u2014 they likely hung up before the video call started. You can close this page.';
+        resetJoinBtn();
+        return;
+      }
+      $('errorMsg').style.color = '';
       $('errorMsg').textContent = data.error;
       resetJoinBtn();
       return;
     }
+    waitUntil = 0;
+    if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+    $('errorMsg').style.color = '';
+    $('errorMsg').textContent = '';
     connectToRoom(data.token, data.room, data.identity);
   })
   .catch(function () {
