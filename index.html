@@ -1587,7 +1587,14 @@ function tezDroplets(cx, cy) {
       if (!g.drag || e.pointerId !== g.drag.id) return;
       var tapped = (performance.now() - g.drag.t < 300) && !g.drag.moved;
       g.drag = null;
-      if (tapped) popGlyph(g);
+      if (tapped) {
+        popGlyph(g);
+        // pass the click through to whatever the glyph was covering (buttons etc.)
+        try {
+          var under = document.elementFromPoint(e.clientX, e.clientY);
+          if (under && typeof under.click === 'function') under.click();
+        } catch (err) {}
+      }
     }
     el.addEventListener('pointerup', release);
     el.addEventListener('pointercancel', release);
