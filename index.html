@@ -561,7 +561,7 @@
 <img id="bgMark" alt="" aria-hidden="true">
 <div class="site-footer">
   <span class="sf-brand"><img id="sfMark" alt="">© 2026 Interpreter Access LLC</span>
-  <a href="/cdn-cgi/l/email-protection#0f6c60617b6e6c7b66617b6a7d7f7d6a7b6a7d6e6c6c6a7c7c4f68626e6663216c6062"><span class="__cf_email__" data-cfemail="7f1c10110b1e1c0b16110b1a0d0f0d1a0b1a0d1e1c1c1a0c0c3f18121e1613511c1012">[email&#160;protected]</span></a>
+  <a href="/cdn-cgi/l/email-protection#d5b6babba1b4b6a1bcbba1b0a7a5a7b0a1b0a7b4b6b6b0a6a695b2b8b4bcb9fbb6bab8"><span class="__cf_email__" data-cfemail="d5b6babba1b4b6a1bcbba1b0a7a5a7b0a1b0a7b4b6b6b0a6a695b2b8b4bcb9fbb6bab8">[email&#160;protected]</span></a>
 </div>
 
 <div id="audioRoot"></div>
@@ -1075,7 +1075,10 @@ function startFresh() {
   window.location.href = window.location.pathname;
 }
 function goPortalHome() {
-  window.location.href = 'https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec';
+  // Came from the portal? Go back in signed-in (the join link carries ret=<their id>)
+  var ret = null;
+  try { ret = new URLSearchParams(window.location.search).get('ret'); } catch (e) {}
+  window.location.href = 'https://script.google.com/macros/s/AKfycbzVfeN1xi9apXtoOn9yi3UQK8ZLlnF17HSLGaJvHmltJVC9sgeWgAV79zpyN4F3cm2v/exec' + (ret ? '?id=' + encodeURIComponent(ret) : '');
 }
 
 // ---------- NEW (v4): duration formatting ----------
