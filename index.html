@@ -667,7 +667,7 @@ function joinRoom() {
   // FIX (v27): attach the invisible interpreter marker to the NAME so the
   // identity carries it — this is what the waiting room, failsafe countdown,
   // and end-of-call logic all look for. It was checked everywhere but never set.
-  if (backendRole === 'interpreter') name = (name || 'Interpreter') + ZWROLE;
+  if (backendRole === 'interpreter') name = (name ? name + ' ' : '') + '(Interpreter)';
   if (backendRole === 'interpreter') { name = (name || 'Interpreter') + '\u200b'; }   // NEW (v9): invisible role marker
   lastSession = { code: code, name: name, role: selectedRole };
   $('joinBtn').disabled = true;
@@ -1001,10 +1001,10 @@ function updateLayoutBtn() {
 
 // ---------- Timer / end of call ----------
 function startTimer() {
-  if (timerInterval) return;
   callStart = Date.now();
+  timerOffsetSec = 0;
   timerInterval = setInterval(function () {
-    var s = Math.floor((Date.now() - callStart) / 1000);
+    var s = Math.max(0, Math.floor((Date.now() - callStart) / 1000) - timerOffsetSec);   // visual offset only
     var mm = String(Math.floor(s / 60)).padStart(2, '0');
     var ss = String(s % 60).padStart(2, '0');
     $('callTimer').textContent = mm + ':' + ss;
@@ -1020,7 +1020,7 @@ var ZWROLE = '\u200b';
 var sawClient = false;
 var autoEndReason = null;
 var codeExpired = false;
-function isInterpreterIdentity(id) { return String(id || '').indexOf(ZWROLE) >= 0; }
+function isInterpreterIdentity(id) { var s = String(id || ''); return s.indexOf(ZWROLE) >= 0 || s.indexOf('(Interpreter)') >= 0; }
 function countRemoteClients() {
   var n = 0;
   if (!activeRoom) return 0;
@@ -1267,9 +1267,10 @@ function stopCallWatchdog() { if (callWatchdog) { clearInterval(callWatchdog); c
 var vriTimer = null, vriBanner = null, vriNotified = false;
 var VRI_WAIT_SECONDS = 60;    // visible countdown length
 var VRI_NOTIFY_AT_LEFT = 20;  // operator is texted when this many seconds remain (i.e. 40s in)
-function isInterpreterParticipant(p) { return String((p && p.identity) || '').indexOf('\u200b') >= 0; }
+function isInterpreterParticipant(p) { return isInterpreterIdentity(p && p.identity); }
 var waitRoom = null;
 var hadInterpreter = false;
+var timerOffsetSec = 0;
 function roomHasInterpreter() {
   var f = false;
   if (!activeRoom) return false;
@@ -1384,8 +1385,8 @@ function vriFailsafeOnJoin(p) {
   if (!isInterpreterParticipant(p)) return;
   stopVriFailsafe();
   hideWaitRoom();
-  if (lastSession && lastSession.role !== 'interpreter' && !hadInterpreter) {
-    callStart = Date.now();   // waited time was on the clock; the call itself starts from 00:00
+  if (lastSession && lastSession.role !== 'interpreter' && !hadInterpreter && callStart) {
+    timerOffsetSec = Math.floor((Date.now() - callStart) / 1000);   // display-only reset; real duration untouched
     var el = $('callTimer'); if (el) el.textContent = '00:00';
   }
   hadInterpreter = true;
