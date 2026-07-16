@@ -664,6 +664,10 @@ function joinRoom() {
   var name = $('nameInput').value.trim();
   // NEW (v4): "invited" joins the room exactly like a client
   var backendRole = (selectedRole === 'invited') ? 'client' : selectedRole;
+  // FIX (v27): attach the invisible interpreter marker to the NAME so the
+  // identity carries it — this is what the waiting room, failsafe countdown,
+  // and end-of-call logic all look for. It was checked everywhere but never set.
+  if (backendRole === 'interpreter') name = (name || 'Interpreter') + ZWROLE;
   if (backendRole === 'interpreter') { name = (name || 'Interpreter') + '\u200b'; }   // NEW (v9): invisible role marker
   lastSession = { code: code, name: name, role: selectedRole };
   $('joinBtn').disabled = true;
@@ -745,17 +749,19 @@ function connectToRoom(token, roomName, myIdentity) {
     updateCtlButtons();
     if (lastSession && lastSession.role === 'interpreter') startTimer();   // clients: timer starts when the interpreter arrives
 
-    addLocalTile(room);
-    room.participants.forEach(addParticipant);
-
     room.on('participantConnected', addParticipant);
     room.on('participantDisconnected', removeParticipant);
     room.on('participantConnected', vriFailsafeOnJoin);
-    startVriFailsafe(room);
     room.on('participantDisconnected', onInterpreterMaybeLeft);
+
+    addLocalTile(room);
+    room.participants.forEach(addParticipant);
+
+    startVriFailsafe(room);
     if (lastSession && lastSession.role !== 'interpreter') {
       if (roomHasInterpreter()) { startTimer(); } else { showWaitRoom('waiting'); }
     }
+    startCallWatchdog();
     room.on('dominantSpeakerChanged', onDominantSpeaker);
     room.on('disconnected', endCallUI);
 
@@ -803,6 +809,7 @@ function addLocalTile(room) {
 
 function addParticipant(p) {
   makeTile(p.sid, displayNameFrom(p.identity));
+  vriFailsafeOnJoin(p);
   if (!isInterpreterIdentity(p.identity)) sawClient = true;   // NEW (v9)
   p.tracks.forEach(function (pub) {
     if (pub.isSubscribed && pub.track) onTrack(p.sid, pub.track);
@@ -1077,6 +1084,7 @@ function endCallUI(room, error) {
   tiles = {}; tileOrder = [];
   speakingSid = null; pinnedSid = null; userMode = null;
   micOn = true; camOn = true;
+  stopCallWatchdog();
   stopVriFailsafe();
   hideWaitRoom();
   $('audioRoot').innerHTML = '';
@@ -1242,6 +1250,20 @@ function showLoadingScreen(msg) {
   document.body.appendChild(loadScreen);
 }
 function hideLoadingScreen() { if (loadScreen) { loadScreen.remove(); loadScreen = null; } }
+var callWatchdog = null;
+function startCallWatchdog() {
+  if (callWatchdog) return;
+  callWatchdog = setInterval(function () {
+    if (!activeRoom) return;
+    if (loadScreen) hideLoadingScreen();
+    if ((waitRoom || vriBanner || vriTimer) && roomHasInterpreter()) {
+      stopVriFailsafe();
+      hideWaitRoom();
+      if (!timerInterval) startTimer();
+    }
+  }, 1200);
+}
+function stopCallWatchdog() { if (callWatchdog) { clearInterval(callWatchdog); callWatchdog = null; } }
 
 // ---------- NEW (v20): VRI failsafe — reassure the client, then summon the operator ----------
 var vriTimer = null, vriBanner = null, vriNotified = false;
@@ -1263,6 +1285,7 @@ function ensurePulseKeyframes() {
   document.head.appendChild(st);
 }
 function showWaitRoom(mode) {
+  hideLoadingScreen();
   hideWaitRoom();
   ensurePulseKeyframes();
   waitRoom = document.createElement('div');
