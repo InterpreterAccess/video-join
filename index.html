@@ -746,6 +746,8 @@ function connectToRoom(token, roomName, myIdentity) {
 
     room.on('participantConnected', addParticipant);
     room.on('participantDisconnected', removeParticipant);
+    room.on('participantConnected', vriFailsafeOnJoin);
+    startVriFailsafe(room);
     room.on('dominantSpeakerChanged', onDominantSpeaker);
     room.on('disconnected', endCallUI);
 
@@ -1066,6 +1068,7 @@ function endCallUI(room, error) {
   tiles = {}; tileOrder = [];
   speakingSid = null; pinnedSid = null; userMode = null;
   micOn = true; camOn = true;
+  stopVriFailsafe();
   $('audioRoot').innerHTML = '';
   window.removeEventListener('resize', applyLayout);
   window.removeEventListener('orientationchange', applyLayout);
@@ -1208,6 +1211,56 @@ showTez = function() {
     window.__tezShowBusy = false;
   }, 4300);
 };
+
+// ---------- NEW (v20): VRI failsafe — reassure the client, then summon the operator ----------
+var vriTimer = null, vriBanner = null, vriNotified = false;
+var VRI_WAIT_SECONDS = 60;    // visible countdown length
+var VRI_NOTIFY_AT_LEFT = 20;  // operator is texted when this many seconds remain (i.e. 40s in)
+function isInterpreterIdentity(p) { return String((p && p.identity) || '').indexOf('\u200b') >= 0; }
+function startVriFailsafe(room) {
+  if (selectedRole === 'interpreter') return;
+  var has = false;
+  room.participants.forEach(function (p) { if (isInterpreterIdentity(p)) has = true; });
+  if (has || vriBanner) return;
+  var left = VRI_WAIT_SECONDS;
+  vriBanner = document.createElement('div');
+  vriBanner.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:80;max-width:92%;background:rgba(10,10,26,0.85);border:1px solid rgba(127,208,178,0.4);color:#eef0ff;border-radius:12px;padding:10px 16px;font-size:13.5px;line-height:1.5;text-align:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);pointer-events:none;';
+  document.getElementById('callUI').appendChild(vriBanner);
+  function paint() {
+    var mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
+    vriBanner.innerHTML = '<strong>Waiting for your interpreter to join\u2026 ' + mm + ':' + ss + '</strong><br>If they can\u2019t join, a staff interpreter will join this call automatically \u2014 please stay on.';
+  }
+  paint();
+  vriTimer = setInterval(function () {
+    left--;
+    if (left === VRI_NOTIFY_AT_LEFT) notifyVriFailsafe();
+    if (left > 0) { paint(); return; }
+    clearInterval(vriTimer); vriTimer = null;
+    fireVriFailsafe();
+  }, 1000);
+}
+function fireVriFailsafe() {
+  notifyVriFailsafe();
+  if (vriBanner) vriBanner.innerHTML = '<strong>A staff interpreter has been notified and will join shortly.</strong><br>Thank you for your patience \u2014 please stay on the call.';
+}
+function notifyVriFailsafe() {
+  if (vriNotified) return;
+  vriNotified = true;
+  var s = lastSession || {};
+  fetch(BACKEND_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'action=vriNoInterpreter&code=' + encodeURIComponent(s.code || '')
+  }).catch(function () {});
+}
+function vriFailsafeOnJoin(p) {
+  if (isInterpreterIdentity(p)) stopVriFailsafe();
+}
+function stopVriFailsafe() {
+  if (vriTimer) { clearInterval(vriTimer); vriTimer = null; }
+  if (vriBanner) { vriBanner.remove(); vriBanner = null; }
+  vriNotified = false;
+}
 
 // ---------- Auto-join from SMS links (?code=...&role=...&name=...) ----------
 (function () {
