@@ -668,6 +668,7 @@ function joinRoom() {
   lastSession = { code: code, name: name, role: selectedRole };
   $('joinBtn').disabled = true;
   $('joinBtn').textContent = 'Connecting...';
+  showLoadingScreen('Connecting to your session\u2026');
   $('errorMsg').textContent = '';
 
   fetch(BACKEND_URL, {
@@ -692,6 +693,7 @@ function joinRoom() {
             $('errorMsg').style.color = '#2f8f70';
             $('errorMsg').textContent = 'Waiting for the client to join\u2026 this page will connect you automatically. Keep it open.';
           }
+          hideLoadingScreen();
           $('joinBtn').textContent = 'Waiting for client\u2026';
           waitTimer = setTimeout(joinRoom, 4000);
           return;
@@ -719,6 +721,7 @@ function joinRoom() {
   });
 }
 function resetJoinBtn() {
+  hideLoadingScreen();
   $('joinBtn').disabled = false;
   $('joinBtn').textContent = 'Join';
 }
@@ -734,12 +737,13 @@ function connectToRoom(token, roomName, myIdentity) {
       video: { mode: 'collaboration', dominantSpeakerPriority: 'high' }
     }
   }).then(function (room) {
+    hideLoadingScreen();
     activeRoom = room;
     $('entryCard').style.display = 'none';
     $('callUI').style.display = 'flex';
     document.body.classList.add('in-call');
     updateCtlButtons();
-    startTimer();
+    if (lastSession && lastSession.role === 'interpreter') startTimer();   // clients: timer starts when the interpreter arrives
 
     addLocalTile(room);
     room.participants.forEach(addParticipant);
@@ -748,6 +752,10 @@ function connectToRoom(token, roomName, myIdentity) {
     room.on('participantDisconnected', removeParticipant);
     room.on('participantConnected', vriFailsafeOnJoin);
     startVriFailsafe(room);
+    room.on('participantDisconnected', onInterpreterMaybeLeft);
+    if (lastSession && lastSession.role !== 'interpreter') {
+      if (roomHasInterpreter()) { startTimer(); } else { showWaitRoom('waiting'); }
+    }
     room.on('dominantSpeakerChanged', onDominantSpeaker);
     room.on('disconnected', endCallUI);
 
@@ -989,6 +997,7 @@ function updateLayoutBtn() {
 
 // ---------- Timer / end of call ----------
 function startTimer() {
+  if (timerInterval) return;
   callStart = Date.now();
   timerInterval = setInterval(function () {
     var s = Math.floor((Date.now() - callStart) / 1000);
@@ -1069,6 +1078,7 @@ function endCallUI(room, error) {
   speakingSid = null; pinnedSid = null; userMode = null;
   micOn = true; camOn = true;
   stopVriFailsafe();
+  hideWaitRoom();
   $('audioRoot').innerHTML = '';
   window.removeEventListener('resize', applyLayout);
   window.removeEventListener('orientationchange', applyLayout);
@@ -1212,15 +1222,109 @@ showTez = function() {
   }, 4300);
 };
 
+// ---------- NEW (v25): branded loading screen (shown only while real work happens) ----------
+var loadScreen = null;
+function showLoadingScreen(msg) {
+  hideLoadingScreen();
+  loadScreen = document.createElement('div');
+  loadScreen.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:radial-gradient(120% 80% at 50% 0%, #14142e 0%, #0b0b20 70%);color:#eef0ff;text-align:center;padding:24px;';
+  var src = document.querySelector('#entryCard .logoBox');
+  if (src) {
+    var c = src.cloneNode(true);
+    c.removeAttribute('onclick'); c.removeAttribute('title');
+    c.style.cssText = 'position:relative;width:96px;height:91px;cursor:default;';
+    loadScreen.appendChild(c);
+  }
+  var t = document.createElement('div');
+  t.style.cssText = 'font-size:15px;color:#b9bfda;';
+  t.textContent = msg || 'Loading\u2026';
+  loadScreen.appendChild(t);
+  document.body.appendChild(loadScreen);
+}
+function hideLoadingScreen() { if (loadScreen) { loadScreen.remove(); loadScreen = null; } }
+
 // ---------- NEW (v20): VRI failsafe — reassure the client, then summon the operator ----------
 var vriTimer = null, vriBanner = null, vriNotified = false;
 var VRI_WAIT_SECONDS = 60;    // visible countdown length
 var VRI_NOTIFY_AT_LEFT = 20;  // operator is texted when this many seconds remain (i.e. 40s in)
-function isInterpreterIdentity(p) { return String((p && p.identity) || '').indexOf('\u200b') >= 0; }
+function isInterpreterParticipant(p) { return String((p && p.identity) || '').indexOf('\u200b') >= 0; }
+var waitRoom = null;
+function roomHasInterpreter() {
+  var f = false;
+  if (!activeRoom) return false;
+  activeRoom.participants.forEach(function (p) { if (isInterpreterParticipant(p)) f = true; });
+  return f;
+}
+function ensurePulseKeyframes() {
+  if (document.getElementById('vrPulseKF')) return;
+  var st = document.createElement('style');
+  st.id = 'vrPulseKF';
+  st.textContent = '@keyframes vrPulse{0%,100%{transform:scale(0.7);opacity:0.7}50%{transform:scale(1.15);opacity:1}}';
+  document.head.appendChild(st);
+}
+function showWaitRoom(mode) {
+  hideWaitRoom();
+  ensurePulseKeyframes();
+  waitRoom = document.createElement('div');
+  waitRoom.style.cssText = 'position:absolute;inset:0;z-index:70;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:radial-gradient(120% 80% at 50% 0%, #1b1b38 0%, #0e0e1c 70%);color:#eef0ff;';
+  var pulse = document.createElement('div');
+  pulse.style.cssText = 'width:64px;height:64px;border-radius:50%;border:3px solid rgba(127,208,178,0.5);display:flex;align-items:center;justify-content:center;';
+  pulse.innerHTML = '<span style="width:26px;height:26px;border-radius:50%;background:#2f8f70;display:block;animation:vrPulse 1.6s ease-in-out infinite;"></span>';
+  var h = document.createElement('div');
+  h.style.cssText = 'font-size:20px;font-weight:700;';
+  var s = document.createElement('div');
+  s.style.cssText = 'font-size:14px;color:#b9bfda;max-width:340px;line-height:1.6;';
+  if (mode === 'left') {
+    h.textContent = 'Your interpreter has left the call';
+    s.textContent = 'If you still need interpretation, request another interpreter and stay on the call.';
+  } else {
+    h.textContent = 'You\u2019re checked in';
+    s.textContent = 'Waiting for your interpreter to join \u2014 the call and timer start the moment they arrive.';
+  }
+  waitRoom.appendChild(pulse); waitRoom.appendChild(h); waitRoom.appendChild(s);
+  if (mode === 'left') {
+    var rb = document.createElement('button');
+    rb.textContent = 'Request another interpreter';
+    rb.style.cssText = 'padding:13px 22px;border:none;border-radius:10px;background:linear-gradient(90deg,#4a4ac2,#2f8f70);color:#fff;font-size:15px;font-weight:700;cursor:pointer;';
+    rb.onclick = function () { requestAnotherInterpreter(rb); };
+    waitRoom.appendChild(rb);
+  }
+  var lv = document.createElement('button');
+  lv.textContent = 'Leave call';
+  lv.style.cssText = 'padding:11px 20px;border:1.5px solid rgba(255,255,255,0.25);border-radius:10px;background:none;color:#b9bfda;font-size:13.5px;font-weight:600;cursor:pointer;';
+  lv.onclick = leaveCall;
+  waitRoom.appendChild(lv);
+  document.getElementById('callUI').appendChild(waitRoom);
+}
+function hideWaitRoom() { if (waitRoom) { waitRoom.remove(); waitRoom = null; } }
+function onInterpreterMaybeLeft(p) {
+  if (!activeRoom) return;
+  if (lastSession && lastSession.role === 'interpreter') return;
+  if (!isInterpreterParticipant(p)) return;
+  if (roomHasInterpreter()) return;
+  showWaitRoom('left');
+}
+function requestAnotherInterpreter(btn) {
+  btn.disabled = true; btn.textContent = 'Contacting interpreters\u2026';
+  var s = lastSession || {};
+  fetch(BACKEND_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'action=vriReblast&code=' + encodeURIComponent(s.code || '')
+  })
+  .then(function (r) { return r.json(); })
+  .then(function () {
+    showWaitRoom('waiting');
+    if (activeRoom) startVriFailsafe(activeRoom);
+  })
+  .catch(function () {
+    btn.disabled = false; btn.textContent = 'Request another interpreter';
+  });
+}
 function startVriFailsafe(room) {
   if (selectedRole === 'interpreter') return;
   var has = false;
-  room.participants.forEach(function (p) { if (isInterpreterIdentity(p)) has = true; });
+  room.participants.forEach(function (p) { if (isInterpreterParticipant(p)) has = true; });
   if (has || vriBanner) return;
   var left = VRI_WAIT_SECONDS;
   vriBanner = document.createElement('div');
@@ -1242,6 +1346,7 @@ function startVriFailsafe(room) {
 function fireVriFailsafe() {
   notifyVriFailsafe();
   if (vriBanner) vriBanner.innerHTML = '<strong>A staff interpreter has been notified and will join shortly.</strong><br>Thank you for your patience \u2014 please stay on the call.';
+  setTimeout(function () { if (vriBanner) { vriBanner.remove(); vriBanner = null; } }, 20000);
 }
 function notifyVriFailsafe() {
   if (vriNotified) return;
@@ -1254,7 +1359,10 @@ function notifyVriFailsafe() {
   }).catch(function () {});
 }
 function vriFailsafeOnJoin(p) {
-  if (isInterpreterIdentity(p)) stopVriFailsafe();
+  if (!isInterpreterParticipant(p)) return;
+  stopVriFailsafe();
+  hideWaitRoom();
+  if (!timerInterval) startTimer();
 }
 function stopVriFailsafe() {
   if (vriTimer) { clearInterval(vriTimer); vriTimer = null; }
