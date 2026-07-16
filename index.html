@@ -1002,9 +1002,8 @@ function updateLayoutBtn() {
 // ---------- Timer / end of call ----------
 function startTimer() {
   callStart = Date.now();
-  timerOffsetSec = 0;
   timerInterval = setInterval(function () {
-    var s = Math.max(0, Math.floor((Date.now() - callStart) / 1000) - timerOffsetSec);   // visual offset only
+    var s = Math.floor((Date.now() - callStart) / 1000);
     var mm = String(Math.floor(s / 60)).padStart(2, '0');
     var ss = String(s % 60).padStart(2, '0');
     $('callTimer').textContent = mm + ':' + ss;
@@ -1037,6 +1036,7 @@ function expireCodeNow(useBeacon) {
   fetch(BACKEND_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body, keepalive: true }).catch(function () {});
 }
 function maybeEndAfterClientLeft() {
+  return;   // v30: DISABLED — a brief client connection blip was ending the whole call
   if (!activeRoom || !sawClient) return;
   if (countRemoteClients() > 0) return;
   if (!(lastSession && lastSession.role === 'interpreter')) return;   // only the interpreter side auto-ends
@@ -1084,7 +1084,6 @@ function endCallUI(room, error) {
   stopCallWatchdog();
   stopVriFailsafe();
   hideWaitRoom();
-  hadInterpreter = false;
   $('audioRoot').innerHTML = '';
   window.removeEventListener('resize', applyLayout);
   window.removeEventListener('orientationchange', applyLayout);
@@ -1257,7 +1256,6 @@ function startCallWatchdog() {
     if ((waitRoom || vriBanner || vriTimer) && roomHasInterpreter()) {
       stopVriFailsafe();
       hideWaitRoom();
-      if (!timerInterval) startTimer();
     }
   }, 1200);
 }
@@ -1265,12 +1263,9 @@ function stopCallWatchdog() { if (callWatchdog) { clearInterval(callWatchdog); c
 
 // ---------- NEW (v20): VRI failsafe — reassure the client, then summon the operator ----------
 var vriTimer = null, vriBanner = null, vriNotified = false;
-var VRI_WAIT_SECONDS = 60;    // visible countdown length
-var VRI_NOTIFY_AT_LEFT = 20;  // operator is texted when this many seconds remain (i.e. 40s in)
+var VRI_NOTIFY_AFTER_MS = 40000;   // emergency interpreters texted after 40s with no interpreter
 function isInterpreterParticipant(p) { return isInterpreterIdentity(p && p.identity); }
 var waitRoom = null;
-var hadInterpreter = false;
-var timerOffsetSec = 0;
 function roomHasInterpreter() {
   var f = false;
   if (!activeRoom) return false;
@@ -1321,12 +1316,6 @@ function showWaitRoom(mode) {
 }
 function hideWaitRoom() { if (waitRoom) { waitRoom.remove(); waitRoom = null; } }
 function onInterpreterMaybeLeft(p) {
-  if (!activeRoom) return;
-  if (lastSession && lastSession.role === 'interpreter') return;
-  if (!isInterpreterParticipant(p)) return;
-  if (roomHasInterpreter()) return;
-  hadInterpreter = false;
-  showWaitRoom('left');
 }
 function requestAnotherInterpreter(btn) {
   btn.disabled = true; btn.textContent = 'Contacting interpreters\u2026';
@@ -1348,28 +1337,13 @@ function startVriFailsafe(room) {
   if (selectedRole === 'interpreter') return;
   var has = false;
   room.participants.forEach(function (p) { if (isInterpreterParticipant(p)) has = true; });
-  if (has || vriBanner) return;
-  var left = VRI_WAIT_SECONDS;
-  vriBanner = document.createElement('div');
-  vriBanner.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:80;max-width:92%;background:rgba(10,10,26,0.85);border:1px solid rgba(127,208,178,0.4);color:#eef0ff;border-radius:12px;padding:10px 16px;font-size:13.5px;line-height:1.5;text-align:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);pointer-events:none;';
-  document.getElementById('callUI').appendChild(vriBanner);
-  function paint() {
-    var mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
-    vriBanner.innerHTML = '<strong>Waiting for your interpreter to join\u2026 ' + mm + ':' + ss + '</strong><br>If they can\u2019t join, a staff interpreter will join this call automatically \u2014 please stay on.';
-  }
-  paint();
-  vriTimer = setInterval(function () {
-    left--;
-    if (left === VRI_NOTIFY_AT_LEFT) notifyVriFailsafe();
-    if (left > 0) { paint(); return; }
-    clearInterval(vriTimer); vriTimer = null;
-    fireVriFailsafe();
-  }, 1000);
-}
-function fireVriFailsafe() {
-  notifyVriFailsafe();
-  if (vriBanner) vriBanner.innerHTML = '<strong>A staff interpreter has been notified and will join shortly.</strong><br>Thank you for your patience \u2014 please stay on the call.';
-  setTimeout(function () { if (vriBanner) { vriBanner.remove(); vriBanner = null; } }, 20000);
+  if (has || vriTimer) return;
+  // SILENT failsafe: the client sees nothing. If no interpreter has joined
+  // by the deadline, the emergency interpreters are texted automatically.
+  vriTimer = setTimeout(function () {
+    vriTimer = null;
+    notifyVriFailsafe();
+  }, VRI_NOTIFY_AFTER_MS);
 }
 function notifyVriFailsafe() {
   if (vriNotified) return;
@@ -1384,13 +1358,6 @@ function notifyVriFailsafe() {
 function vriFailsafeOnJoin(p) {
   if (!isInterpreterParticipant(p)) return;
   stopVriFailsafe();
-  hideWaitRoom();
-  if (lastSession && lastSession.role !== 'interpreter' && !hadInterpreter && callStart) {
-    timerOffsetSec = Math.floor((Date.now() - callStart) / 1000);   // display-only reset; real duration untouched
-    var el = $('callTimer'); if (el) el.textContent = '00:00';
-  }
-  hadInterpreter = true;
-  if (!timerInterval) startTimer();
 }
 function stopVriFailsafe() {
   if (vriTimer) { clearInterval(vriTimer); vriTimer = null; }
