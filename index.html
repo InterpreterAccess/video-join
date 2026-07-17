@@ -1250,7 +1250,7 @@ function startVriFailsafe(room) {
   var left = VRI_WAIT_SECONDS;
   vriBanner = document.createElement('div');
   vriBanner.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:80;max-width:92%;background:rgba(10,10,26,0.85);border:1px solid rgba(127,208,178,0.4);color:#eef0ff;border-radius:12px;padding:10px 16px;font-size:13.5px;line-height:1.5;text-align:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);pointer-events:none;';
-  document.getElementById('callUI').appendChild(vriBanner);
+  // banner removed per request — countdown runs invisibly; operator alert unchanged
   function paint() {
     var mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
     vriBanner.innerHTML = '<strong>Waiting for your interpreter to join\u2026 ' + mm + ':' + ss + '</strong><br>If they can\u2019t join, a staff interpreter will join this call automatically \u2014 please stay on.';
