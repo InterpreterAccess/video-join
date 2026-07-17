@@ -1103,6 +1103,15 @@ function endCallUI(room, error) {
   if (lastSession && lastSession.role === 'interpreter') {
     $('backPortalBtn').style.display = 'block';
     $('anotherCallBtn').style.display = 'none';
+  } else {
+    // NEW: clients who joined from the client portal get a way back
+    try {
+      var cpQs = new URLSearchParams(window.location.search);
+      if (cpQs.get('clpo') === '1') {
+        $('anotherCallBtn').textContent = 'Back to client portal';
+        $('anotherCallBtn').onclick = function () { window.location.href = 'clients.html'; };
+      }
+    } catch (cpErr) {}
   }
   $('endedCard').style.display = 'block';
 }
