@@ -1290,6 +1290,12 @@ function stopVriFailsafe() {
 // ---------- Auto-join from SMS links (?code=...&role=...&name=...) ----------
 (function () {
   var urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('connecting') === '1') {
+    // Opened by the portal's Accept button — hold the loading screen until
+    // it points this tab at the call (or bail to the entry card after 12s).
+    showLoadingScreen('Connecting you to your call\u2026');
+    setTimeout(hideLoadingScreen, 12000);
+  }
   var code = urlParams.get('code');
   var role = urlParams.get('role');
   var name = urlParams.get('name');
