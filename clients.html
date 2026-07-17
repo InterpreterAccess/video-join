@@ -18,7 +18,7 @@
 </div>
 <script>
   // Forward any query string (e.g. ?id=... from sign-in redirects) into the portal
-  var BASE = 'https://script.google.com/macros/s/AKfycbw1qTFvau6MyEmmpkUk_UEheEMUah2sdRGqg0rC3iMSMgiOoEWvniax3w3WErzhCNVUXg/exec';
+  var BASE = 'PASTE_YOUR_NEW_WEB_APP_EXEC_URL_HERE';
   var f = document.getElementById('portalFrame');
   var done = false;
   function hideLoad() {
@@ -31,7 +31,14 @@
   }
   f.addEventListener('load', function () { setTimeout(hideLoad, 250); });
   setTimeout(hideLoad, 25000);   // failsafe: never trap anyone behind the loader
-  f.src = BASE + (location.search || '');
+  var q = location.search || '';
+  try {
+    var um = q.match(/[?&]u=(\d+)/);
+    if (/[?&]logout=1/.test(q)) { localStorage.removeItem('ia-client-u'); q = ''; }
+    else if (um) { localStorage.setItem('ia-client-u', um[1]); }
+    else if (!q) { var su = localStorage.getItem('ia-client-u'); if (su) q = '?u=' + su; }
+  } catch (e) {}
+  f.src = BASE + q;
 </script>
 </body>
 </html>
