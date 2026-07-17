@@ -668,6 +668,7 @@ function joinRoom() {
   lastSession = { code: code, name: name, role: selectedRole };
   $('joinBtn').disabled = true;
   $('joinBtn').textContent = 'Connecting...';
+  showLoadingScreen('Connecting to your session\u2026');
   $('errorMsg').textContent = '';
 
   fetch(BACKEND_URL, {
@@ -692,6 +693,7 @@ function joinRoom() {
             $('errorMsg').style.color = '#2f8f70';
             $('errorMsg').textContent = 'Waiting for the client to join\u2026 this page will connect you automatically. Keep it open.';
           }
+          hideLoadingScreen();
           $('joinBtn').textContent = 'Waiting for client\u2026';
           waitTimer = setTimeout(joinRoom, 4000);
           return;
@@ -719,6 +721,7 @@ function joinRoom() {
   });
 }
 function resetJoinBtn() {
+  hideLoadingScreen();
   $('joinBtn').disabled = false;
   $('joinBtn').textContent = 'Join';
 }
@@ -734,6 +737,7 @@ function connectToRoom(token, roomName, myIdentity) {
       video: { mode: 'collaboration', dominantSpeakerPriority: 'high' }
     }
   }).then(function (room) {
+    hideLoadingScreen();
     activeRoom = room;
     $('entryCard').style.display = 'none';
     $('callUI').style.display = 'flex';
@@ -1211,6 +1215,27 @@ showTez = function() {
     window.__tezShowBusy = false;
   }, 4300);
 };
+
+// ---------- Loading screen: animated logo while connecting ----------
+var loadScreen = null;
+function showLoadingScreen(msg) {
+  hideLoadingScreen();
+  loadScreen = document.createElement('div');
+  loadScreen.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:radial-gradient(120% 80% at 50% 0%, #14142e 0%, #0b0b20 70%);color:#eef0ff;text-align:center;padding:24px;';
+  var src = document.querySelector('#entryCard .logoBox');
+  if (src) {
+    var c = src.cloneNode(true);
+    c.removeAttribute('onclick'); c.removeAttribute('title');
+    c.style.cssText = 'position:relative;width:96px;height:91px;cursor:default;';
+    loadScreen.appendChild(c);
+  }
+  var t = document.createElement('div');
+  t.style.cssText = 'font-size:15px;color:#b9bfda;';
+  t.textContent = msg || 'Loading\u2026';
+  loadScreen.appendChild(t);
+  document.body.appendChild(loadScreen);
+}
+function hideLoadingScreen() { if (loadScreen) { loadScreen.remove(); loadScreen = null; } }
 
 // ---------- NEW (v20): VRI failsafe — reassure the client, then summon the operator ----------
 var vriTimer = null, vriBanner = null, vriNotified = false;
